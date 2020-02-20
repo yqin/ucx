@@ -273,10 +273,24 @@ uct_ib_mlx5_exp_umr_fill_repeated(uct_ib_umr_t *umr, const uct_iov_t *iov,
     memset(wr, 0, sizeof(*wr));
     mem_rep_list = ucs_calloc(iov_count, sizeof(*mem_rep_list), "UMR memlist");
     if (mem_rep_list == NULL) {
-        ucs_fatal("can't allocated mem_repeat_block for UMR");
+        ucs_error("can't allocated mem_repeat_block for UMR");
+        goto err_no_mem;
     }
 
     for(i = 0; i < iov_count; ++i) {
+        mem_rep_list[i].byte_count = ucs_calloc(1,
+                                                sizeof(mem_rep_list[i].byte_count[0]),
+                                                "byte_count");
+        if (mem_rep_list[i].byte_count == NULL) {
+            ucs_error("failed to allocate byte_cnt for mem_rep_list");
+            goto err_clean_mem_rep_list;
+        }
+        mem_rep_list[i].stride = ucs_calloc(1, sizeof(mem_rep_list[i].stride[0]),
+                                            "stride");
+        if (mem_rep_list[i].stride == NULL) {
+            ucs_error("failed to allocate stride for mem_rep_list");
+            goto err_clean_mem_rep_list;
+        }
         mem_rep_list[i].mr            = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
         mem_rep_list[i].base_addr     = (uint64_t)iov[i].buffer;
         mem_rep_list[i].byte_count[0] = iov[i].length;
@@ -289,6 +303,15 @@ uct_ib_mlx5_exp_umr_fill_repeated(uct_ib_umr_t *umr, const uct_iov_t *iov,
     wr->ext_op.umr.mem_list.rb.stride_dim            = 1;
 
     return UCS_OK;
+
+err_clean_mem_rep_list:
+    for (i = 0; i < iov_count; ++i) {
+        ucs_free(mem_rep_list[i].byte_count);
+        ucs_free(mem_rep_list[i].stride);
+    }
+    ucs_free(mem_rep_list);
+err_no_mem:
+    return UCS_ERR_NO_MEMORY;
 }
 
 /* TODO: Support KSM */
@@ -308,6 +331,8 @@ uct_ib_mlx5_exp_umr_fill_region(uct_ib_umr_t *umr, const uct_iov_t *iov,
         mem_reg[i].base_addr = (uint64_t)iov[i].buffer; /* mr->addr? */
         mem_reg[i].length    = iov[i].length;
         mem_reg[i].mr        = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
+        ucs_info("fill_region(%d): addr %p(%ld), len %ld mr %p (memh %p)",
+                 i,iov[i].buffer,  mem_reg[i].base_addr , mem_reg[i].length, mem_reg[i].mr, iov[i].memh);
     }
 
     umr->wr.ext_op.umr.umr_type              = IBV_EXP_UMR_MR_LIST;
@@ -342,6 +367,7 @@ uct_ib_mlx5_exp_umr_alloc(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     if (umr == NULL) {
         ucs_fatal("can't allocate UMR");
     }
+    memset(&umr->wr, 0, sizeof(umr->wr));
 
     umr->repeat_count = repeat_count;
     umr->depth        = umr_depth;
@@ -351,9 +377,9 @@ uct_ib_mlx5_exp_umr_alloc(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     umr->memh.umr     = umr;
 
     if (repeat_count == 1) { /* MRs list */
-        status = uct_ib_mlx5_exp_umr_fill_repeated(umr, iov, iov_count);
-    } else { /* stride/interleave */
         status = uct_ib_mlx5_exp_umr_fill_region(umr, iov, iov_count);
+    } else { /* stride/interleave */
+        status = uct_ib_mlx5_exp_umr_fill_repeated(umr, iov, iov_count);
     }
 
     *memh_p = &umr->memh.super;
@@ -397,7 +423,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     }
 */
     /* Fill indirect MR */
-    umr->is_inline = (umr->iov_count > md->super.config.max_inline_klm_list);
+    umr->is_inline = (umr->iov_count <= md->super.config.max_inline_klm_list);
 
     /* If the list exceeds max inline size, allocate a container object */
     if (umr->is_inline) {
@@ -424,11 +450,16 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     wr->ext_op.umr.num_mrs     = umr->iov_count;
     wr->ext_op.umr.base_addr   = umr->base_addr;
 
+
     /* Post UMR */
     ret = ibv_exp_post_send(qp, wr, &bad_wr);
     if (ret) {
         ucs_fatal("ibv_exp_post_send(UMR_FILL) failed: %m");
     }
+    ucs_info("num_mrs %d, base_addr %p, inline %d, type %d",
+             wr->ext_op.umr.num_mrs,
+             (void*)(uintptr_t)wr->ext_op.umr.base_addr, umr->is_inline,
+             wr->ext_op.umr.umr_type);
 
     /* Wait for send UMR completion */
     for (;;) {

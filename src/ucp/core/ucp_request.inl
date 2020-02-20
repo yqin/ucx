@@ -347,12 +347,12 @@ ucp_request_send_state_advance(ucp_request_t *req,
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
 ucp_request_send_buffer_reg(ucp_request_t *req, ucp_md_map_t md_map,
-                            unsigned uct_flags)
+                            unsigned uct_flags, ucp_lane_index_t lane)
 {
     return ucp_request_memory_reg(req->send.ep->worker->context, md_map,
                                   (void*)req->send.buffer, req->send.length,
                                   req->send.datatype, &req->send.state.dt,
-                                  req->send.mem_type, req, uct_flags);
+                                  req->send.mem_type, req, uct_flags, lane);
 }
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
@@ -369,7 +369,7 @@ ucp_request_send_buffer_reg_lane_check(ucp_request_t *req, ucp_lane_index_t lane
     ucs_assert(ucp_ep_md_attr(req->send.ep,
                               lane)->cap.flags & UCT_MD_FLAG_REG);
     md_map = UCS_BIT(ucp_ep_md_index(req->send.ep, lane)) | prev_md_map;
-    return ucp_request_send_buffer_reg(req, md_map, uct_flags);
+    return ucp_request_send_buffer_reg(req, md_map, uct_flags, lane);
 }
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
@@ -411,7 +411,7 @@ ucp_request_recv_buffer_reg(ucp_request_t *req, ucp_md_map_t md_map,
                                   req->recv.buffer, length,
                                   req->recv.datatype, &req->recv.state,
                                   req->recv.mem_type, req,
-                                  UCT_MD_MEM_FLAG_HIDE_ERRORS);
+                                  UCT_MD_MEM_FLAG_HIDE_ERRORS, UCP_NULL_LANE);
 }
 
 static UCS_F_ALWAYS_INLINE void ucp_request_send_buffer_dereg(ucp_request_t *req)
@@ -508,8 +508,7 @@ ucp_request_recv_data_unpack(ucp_request_t *req, const void *data,
     case UCP_DATATYPE_STRUCT:
         UCS_PROFILE_CALL_VOID(ucp_dt_struct_scatter,
                               req->recv.buffer, req->recv.datatype,
-                              data, length, offset,
-                              req->recv.state.dt.struct_dt.state);
+                              data, length, offset);
         return UCS_OK;
     default:
         ucs_fatal("unexpected datatype=%lx", req->recv.datatype);

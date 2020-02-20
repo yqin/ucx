@@ -17,34 +17,45 @@
 #include <ucs/debug/assert.h>
 #include <ucs/sys/math.h>
 #include <src/uct/api/uct.h>
+#include <ucp/core/ucp_ep.inl>
 
 #include <string.h>
 #include <unistd.h>
 
+ucs_status_t _struct_register_ep_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
+                                     uct_mem_h contig_memh, uct_mem_h* memh);
+
 static void _set_length(ucp_dt_struct_t *s)
 {
-    size_t i, length = 0;
+    size_t i, length = 0, iovs = 0;
 
     for (i = 0; i < s->desc_count; i++) {
         ucp_struct_dt_desc_t *dsc = &s->desc[i];
         switch (dsc->dt & UCP_DATATYPE_CLASS_MASK) {
         case UCP_DATATYPE_CONTIG:
             length += ucp_contig_dt_length(dsc->dt, 1);
+            ++iovs;
             break;
         case UCP_DATATYPE_STRUCT:
             length += ucp_dt_struct_length(ucp_dt_struct(dsc->dt));
+            iovs   += ucp_dt_struct(dsc->dt)->uct_iov_count;
+            break;
         case UCP_DATATYPE_IOV:
         case UCP_DATATYPE_GENERIC:
             /* These types are not supported in the struct datatype */
         default:
             /* Should not happen! */
-            ucs_assert(0);
+            ucs_assertv(0, "wrong dt %ld", dsc->dt & UCP_DATATYPE_CLASS_MASK);
             break;
 
         }
     }
-    s->step_len = length;
-    s->len = length * s->rep_count;
+    /* TODO: UMR will be created for repeated patterns, otherwise can unfold.
+     * In case of nested umr just one iov would be enough. Need to distinguish
+     * "leaf" and "nested" structs */
+    s->uct_iov_count = iovs;
+    s->step_len      = length;
+    s->len           = length * s->rep_count;
 }
 
 static void _set_depth(ucp_dt_struct_t *s)
@@ -205,10 +216,13 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
                                   ucp_datatype_t *datatype_p)
 {
     ucp_dt_struct_t *dt;
-    int ret;
     size_t i;
 
-    for(i=0; i < desc_count; i++){
+    /* Sanity check:
+     * Structured datatype only supports UCP_DATATYPE_CONTIG and
+     * UCP_DATATYPE_STRUCT as sub-datatypes
+     */
+    for(i = 0; i < desc_count; i++){
         switch (desc_ptr[i].dt & UCP_DATATYPE_CLASS_MASK) {
         case UCP_DATATYPE_CONTIG:
         case UCP_DATATYPE_STRUCT:
@@ -221,31 +235,27 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
         }
     }
 
-    /* Sanity check:
-     * Structured datatype only supports UCP_DATATYPE_CONTIG and
-     * UCP_DATATYPE_STRUCT as sub-datatypes
-     */
-
-    ret = ucs_posix_memalign((void **)&dt,
-                             ucs_max(sizeof(void *), UCS_BIT(UCP_DATATYPE_SHIFT)),
-                             sizeof(*dt), "struct_dt");
-    if (ret != 0) {
+    dt = ucs_calloc(1, sizeof(*dt), "dt_struct");
+    if (dt == NULL) {
         return UCS_ERR_NO_MEMORY;
     }
 
-    ret = ucs_posix_memalign((void **)&dt->desc, sizeof(*dt->desc),
-                             sizeof(*dt->desc) * dt->desc_count,
-                             "ucp_dt_struct_t");
-    if (ret != 0) {
+    dt->desc = ucs_calloc(desc_count, sizeof(*dt->desc), "dt_desc");
+    if (dt->desc == NULL) {
         ucs_free(dt);
         return UCS_ERR_NO_MEMORY;
     }
+
     memcpy(dt->desc, desc_ptr, sizeof(*desc_ptr) * desc_count);
     dt->desc_count = desc_count;
     dt->rep_count = rep_count;
     _set_length(dt);
     _set_depth(dt);
     *datatype_p = ((uintptr_t)dt) | UCP_DATATYPE_STRUCT;
+
+    ucs_info("Created struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld",
+             dt, dt->len, dt->step_len, dt->depth, dt->uct_iov_count);
+
     return UCS_OK;
 }
 
@@ -258,7 +268,7 @@ void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
 }
 
 void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
-                          size_t length, size_t offset, void *state)
+                          size_t length, size_t offset)
 {
     size_t processed_len;
     ucp_dt_struct_t *s = ucp_dt_struct(dt);
@@ -273,8 +283,7 @@ void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
 }
 
 size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt,
-                             const void *src, size_t length, size_t offset,
-                             void *state)
+                             const void *src, size_t length, size_t offset)
 {
     size_t processed_len;
     ucp_dt_struct_t *s = ucp_dt_struct(dt);
@@ -295,17 +304,13 @@ inline static void _to_cache(ucp_dt_struct_t *s, void *ptr, uct_mem_h memh)
 {
     khiter_t k;
     int ret;
+
     k = kh_put(dt_struct, &s->hash, (uint64_t)ptr, &ret);
     /* TODO: check ret */
     kh_value(&s->hash, k) = memh;
 }
-inline static int _in_cache(ucp_dt_struct_t *s, void *ptr)
-{
-    khiter_t k;
-    k = kh_get(dt_struct, &s->hash, (uint64_t)ptr);
-    return (k != kh_end(&s->hash));
-}
 
+#if 0
 static int _is_primitive_strided(ucp_dt_struct_t *s)
 {
     size_t i;
@@ -323,42 +328,91 @@ static int _is_primitive_strided(ucp_dt_struct_t *s)
     }
     return 1;
 }
+#endif
 
-static int _reg_primitive_strided(uct_ep_h ep, ucp_dt_struct_t *s, void *ptr)
+static uct_iov_t* _fill_uct_iov_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
+                                    uct_mem_h contig_memh, uct_iov_t *iovs)
 {
-    size_t i;
-    uct_iov_t *iovs = ucs_calloc(s->desc_count, sizeof(*iovs));
-    size_t iov_cnt = s->desc_count;
-    uct_md_h md_p;
-    uct_mem_h memh;
-    uct_completion_t comp;
+    uct_iov_t *iov = iovs;
+    ucp_dt_struct_t *s_in;
+    ucs_status_t status;
+    void *ptr;
+    int i;
 
-    /* On the leaf level, all datatypes are contig */
-    for (i = 0; i < s->desc_count; i++) {
-        iovs[i].buffer = ptr + s->desc[i].displ;
-        iovs[i].length = ucp_contig_dt_length(s->desc[i].dt, 1);
-        // iovs[i].count = ????
-        iovs[i].stride = s->desc[i].extent;
-        // iovs[i].memh = ??
+    for (i = 0; i < s->desc_count; i++, iov++) {
+        ptr = UCS_PTR_BYTE_OFFSET(buf, s->desc[i].displ);
+
+        if (UCP_DT_IS_STRUCT(s->desc[i].dt)) {
+            s_in = ucp_dt_struct(s->desc[i].dt);
+            if (s_in->rep_count == 1) {
+                iov = _fill_uct_iov_rec(ep, ptr, s_in, contig_memh, iov);
+            } else {
+                iov->buffer = ptr;
+                iov->length = s_in->len;
+                iov->stride = s->desc[i].extent;
+                status      = _struct_register_ep_rec(ep, ptr, s_in,
+                                                      contig_memh, &iov->memh);
+                ucs_assert_always(status == UCS_OK);
+            }
+        } else {
+            /* On the leaf level, all datatypes are contig */
+            iov->buffer = ptr;
+            iov->length = ucp_contig_dt_length(s->desc[i].dt, 1);
+            iov->stride = s->desc[i].extent;
+            iov->memh   = contig_memh;
+        }
     }
-    uct_ep_mem_reg_nc(ep, iovs, iov_cnt, s->rep_count, &md_p /* ?? */,
-                      &memh, &comp);
 
-    /* wait for completion */
-
-    _to_cache(s, ptr, memh);
-    return 1;
+    return iov;
 }
 
-int ucp_dt_struct_register(uct_ep_h ep, ucp_datatype_t dt, void *ptr)
+ucs_status_t _struct_register_ep_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
+                                     uct_mem_h contig_memh, uct_mem_h* memh)
 {
-    ucp_dt_struct_t *s = ucp_dt_struct(dt);
+    size_t iov_cnt  = s->uct_iov_count;
+    uct_iov_t *iovs = ucs_calloc(iov_cnt, sizeof(*iovs), "umr_iovs");
+    ucs_status_t status;
+    uct_md_h md_p;
+    uct_completion_t comp;
 
-    if( _in_cache(s, ptr) ){
-        return UCS_OK;
+    _fill_uct_iov_rec(ep, buf, s, contig_memh, iovs);
+
+    status = uct_ep_mem_reg_nc(ep, iovs, iov_cnt, s->rep_count,
+                               &md_p, /* remove me */
+                               &memh[0], /* revise */
+                               &comp);
+    if (status != UCS_OK) {
+        ucs_error("Failed to register NC memh: %s", ucs_status_string(status));
+        return status;
     }
-    if( _is_primitive_strided(s)){
-        _reg_primitive_strided(ep, s, ptr);
+
+    /* TODO: wait for completion (now uct_ep_mem_reg_nc is blocking) */
+
+    ucs_free(iovs); /* optimize */
+
+    return UCS_OK;
+}
+
+ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
+                                       void *buf, ucp_datatype_t dt, uct_mem_h
+                                       contig_memh, uct_mem_h* memh,
+                                       ucp_md_map_t *md_map_p)
+{
+    ucp_dt_struct_t *s    = ucp_dt_struct(dt);
+    uct_ep_h uct_ep       = ep->uct_eps[lane];
+    ucp_md_index_t md_idx = ucp_ep_md_index(ep, lane);
+    ucs_status_t status;
+
+    ucs_assert_always(UCP_DT_IS_STRUCT(dt));
+
+    ucs_info("Register struct %ld, len %ld", dt, s->len);
+
+    status = _struct_register_ep_rec(uct_ep, buf, s, contig_memh, memh);
+    if (status == UCS_OK) {
+        *md_map_p = UCS_BIT(md_idx);
+        _to_cache(s, buf, memh[0]);
+
     }
-    return 0;
+
+    return status;
 }

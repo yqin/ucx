@@ -10,6 +10,7 @@
 #include <ucp/api/ucp.h>
 #include <ucs/datastruct/khash.h>
 #include <src/uct/api/uct.h>
+#include <ucp/core/ucp_types.h>
 
 KHASH_MAP_INIT_INT64(dt_struct, uct_mem_h)
 /*
@@ -38,6 +39,7 @@ typedef struct ucp_dt_struct {
     size_t len, step_len, depth;
     size_t desc_count;
     size_t rep_count;
+    size_t uct_iov_count; /* total count of needed UCT iovs for unfolded struct */
     khash_t(dt_struct) hash;
 } ucp_dt_struct_t;
 
@@ -65,6 +67,15 @@ static inline size_t ucp_dt_struct_depth(const ucp_dt_struct_t *s)
     return s->depth;
 }
 
+static UCS_F_ALWAYS_INLINE uct_mem_h ucp_dt_struct_in_cache(ucp_dt_struct_t *s,
+                                                            void *ptr)
+{
+    khiter_t k;
+    k = kh_get(dt_struct, &s->hash, (uint64_t)ptr);
+
+    return (k == kh_end(&s->hash)) ? NULL : kh_value(&s->hash, k);
+}
+
 
 ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
                                   size_t desc_count, size_t rep_count,
@@ -72,11 +83,14 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
 void ucp_dt_destroy_struct(ucp_datatype_t datatype_p);
 
 void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
-                          size_t length, size_t offset, void *state);
+                          size_t length, size_t offset);
 
 size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt, const void *src,
-                          size_t length, size_t offset, void *state);
+                          size_t length, size_t offset);
 
-
+ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
+                                       void *buf, ucp_datatype_t dt, uct_mem_h
+                                       contig_memh, uct_mem_h* memh,
+                                       ucp_md_map_t *md_map);
 
 #endif // DT_STRUCT_H

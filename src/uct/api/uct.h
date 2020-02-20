@@ -2539,10 +2539,10 @@ UCT_INLINE_API ucs_status_t uct_ep_mem_reg_nc(uct_ep_h ep, const uct_iov_t *iov,
  * @ingroup UCT_AM
  * @brief Deregister non-contiguous memory.
  */
-UCT_INLINE_API ucs_status_t uct_ep_mem_dereg_nc(uct_ep_h ep, uct_mem_h *memh_p,
+UCT_INLINE_API ucs_status_t uct_ep_mem_dereg_nc(uct_ep_h ep, uct_mem_h memh,
                                                 uct_completion_t *comp)
 {
-    return ep->iface->ops.ep_mem_dereg_nc(ep, memh_p, comp);
+    return ep->iface->ops.ep_mem_dereg_nc(ep, memh, comp);
 }
 
 /**

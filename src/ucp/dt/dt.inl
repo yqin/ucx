@@ -32,6 +32,9 @@ size_t ucp_dt_length(ucp_datatype_t datatype, size_t count,
         ucs_assert(NULL != dt_gen);
         return dt_gen->ops.packed_size(state->dt.generic.state);
 
+    case UCP_DATATYPE_STRUCT:
+        return ucp_dt_struct(datatype)->len;
+
     default:
         ucs_error("Invalid data type");
     }
