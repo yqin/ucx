@@ -25,9 +25,14 @@
 ucs_status_t _struct_register_ep_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
                                      uct_mem_h contig_memh, uct_mem_h* memh);
 
+ucs_status_t _struct_register_rec(uct_md_h md, void *buf, ucp_dt_struct_t *s,
+                                  uct_mem_h contig_memh, uct_mem_h* memh);
+
 static void _set_length(ucp_dt_struct_t *s)
 {
     size_t i, length = 0, iovs = 0;
+    size_t min_disp = SIZE_MAX;
+    size_t max_disp = 0;
 
     for (i = 0; i < s->desc_count; i++) {
         ucp_struct_dt_desc_t *dsc = &s->desc[i];
@@ -49,6 +54,8 @@ static void _set_length(ucp_dt_struct_t *s)
             break;
 
         }
+        min_disp = ucs_min(min_disp, dsc->displ);
+        max_disp = ucs_max(max_disp, dsc->displ + dsc->extent);
     }
     /* TODO: UMR will be created for repeated patterns, otherwise can unfold.
      * In case of nested umr just one iov would be enough. Need to distinguish
@@ -56,6 +63,7 @@ static void _set_length(ucp_dt_struct_t *s)
     s->uct_iov_count = iovs;
     s->step_len      = length;
     s->len           = length * s->rep_count;
+    s->extent        = max_disp - min_disp;
 }
 
 static void _set_depth(ucp_dt_struct_t *s)
@@ -405,11 +413,89 @@ ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
 
     ucs_assert_always(UCP_DT_IS_STRUCT(dt));
 
-    ucs_info("Register struct %ld, len %ld", dt, s->len);
+    ucs_info("Register struct on ep %ld, len %ld", dt, s->len);
 
     status = _struct_register_ep_rec(uct_ep, buf, s, contig_memh, memh);
     if (status == UCS_OK) {
         *md_map_p = UCS_BIT(md_idx);
+        _to_cache(s, buf, memh[0]);
+
+    }
+
+    return status;
+}
+
+static uct_iov_t* _fill_md_uct_iov_rec(uct_md_h md, void *buf, ucp_dt_struct_t *s,
+                                       uct_mem_h contig_memh, uct_iov_t *iovs)
+{
+    uct_iov_t *iov = iovs;
+    ucp_dt_struct_t *s_in;
+    ucs_status_t status;
+    void *ptr;
+    int i;
+
+    for (i = 0; i < s->desc_count; i++, iov++) {
+        ptr = UCS_PTR_BYTE_OFFSET(buf, s->desc[i].displ);
+
+        if (UCP_DT_IS_STRUCT(s->desc[i].dt)) {
+            s_in = ucp_dt_struct(s->desc[i].dt);
+            if (s_in->rep_count == 1) {
+                iov = _fill_md_uct_iov_rec(md, ptr, s_in, contig_memh, iov);
+            } else {
+                iov->buffer = ptr;
+                iov->length = s_in->len;
+                iov->stride = s->desc[i].extent;
+                status = _struct_register_rec(md, buf, s_in, contig_memh, &iov->memh);
+                ucs_assert_always(status == UCS_OK);
+            }
+        } else {
+            /* On the leaf level, all datatypes are contig */
+            iov->buffer = ptr;
+            iov->length = ucp_contig_dt_length(s->desc[i].dt, 1);
+            iov->stride = s->desc[i].extent;
+            iov->memh   = contig_memh;
+        }
+    }
+
+    return iov;
+}
+
+ucs_status_t _struct_register_rec(uct_md_h md, void *buf, ucp_dt_struct_t *s,
+                                  uct_mem_h contig_memh, uct_mem_h* memh)
+{
+    size_t iov_cnt  = s->uct_iov_count;
+    uct_iov_t *iovs = ucs_calloc(iov_cnt, sizeof(*iovs), "umr_iovs");
+    ucs_status_t status;
+
+    _fill_md_uct_iov_rec(md, buf, s, contig_memh, iovs);
+
+    status = uct_md_mem_reg_nc(md, iovs, iov_cnt, s->rep_count, &memh[0]);
+    if (status != UCS_OK) {
+        ucs_error("Failed to register NC memh: %s", ucs_status_string(status));
+        return status;
+    }
+
+    /* TODO: wait for completion (now uct_ep_mem_reg_nc is blocking) */
+
+    ucs_free(iovs); /* optimize */
+
+    return UCS_OK;
+}
+
+ucs_status_t ucp_dt_struct_register(uct_md_h md, void *buf, ucp_datatype_t dt,
+                                    uct_mem_h contig_memh, uct_mem_h* memh,
+                                    ucp_md_map_t *md_map_p)
+{
+    ucp_dt_struct_t *s = ucp_dt_struct(dt);
+    ucs_status_t status;
+
+    ucs_assert_always(UCP_DT_IS_STRUCT(dt));
+
+    ucs_info("Register struct on md, dt %ld, len %ld", dt, s->len);
+
+    status = _struct_register_rec(md, buf, s, contig_memh, memh);
+    if (status == UCS_OK) {
+        //*md_map_p = UCS_BIT(md_idx);
         _to_cache(s, buf, memh[0]);
 
     }

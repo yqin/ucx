@@ -40,6 +40,7 @@ typedef struct ucp_dt_struct {
     size_t desc_count;
     size_t rep_count;
     size_t uct_iov_count; /* total count of needed UCT iovs for unfolded struct */
+    size_t extent; /* total contig space covering the whole type */
     khash_t(dt_struct) hash;
 } ucp_dt_struct_t;
 
@@ -92,5 +93,9 @@ ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
                                        void *buf, ucp_datatype_t dt, uct_mem_h
                                        contig_memh, uct_mem_h* memh,
                                        ucp_md_map_t *md_map);
+
+ucs_status_t ucp_dt_struct_register(uct_md_h md, void *buf, ucp_datatype_t dt,
+                                    uct_mem_h contig_memh, uct_mem_h* memh,
+                                    ucp_md_map_t *md_map_p);
 
 #endif // DT_STRUCT_H

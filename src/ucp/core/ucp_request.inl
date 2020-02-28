@@ -330,7 +330,8 @@ ucp_request_send_state_advance(ucp_request_t *req,
         /* Fall through */
     case UCP_REQUEST_SEND_PROTO_BCOPY_AM:
         ucs_assert(new_dt_state != NULL);
-        if (UCP_DT_IS_CONTIG(req->send.datatype)) {
+        if (UCP_DT_IS_CONTIG(req->send.datatype) ||
+            UCP_DT_IS_STRUCT(req->send.datatype)) {
             req->send.state.dt.offset = new_dt_state->offset;
         } else {
             req->send.state.dt        = *new_dt_state;

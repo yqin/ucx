@@ -413,6 +413,17 @@ ucs_status_t uct_md_mem_reg(uct_md_h md, void *address, size_t length,
     return md->ops->mem_reg(md, address, length, flags, memh_p);
 }
 
+ucs_status_t uct_md_mem_reg_nc(uct_md_h md, const uct_iov_t *iov,
+                               size_t iovcnt, size_t repeat_count,
+                               uct_mem_h *memh_p)
+{
+    if ((iovcnt == 0) || (repeat_count == 0)) {
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    return md->ops->mem_reg_nc(md, iov, iovcnt, repeat_count, memh_p);
+}
+
 ucs_status_t uct_md_mem_dereg(uct_md_h md, uct_mem_h memh)
 {
     return md->ops->mem_dereg(md, memh);

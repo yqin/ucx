@@ -750,6 +750,15 @@ static ucs_status_t uct_ib_mem_reg(uct_md_h uct_md, void *address, size_t length
     return UCS_OK;
 }
 
+ucs_status_t uct_ib_mem_reg_noncontig(uct_md_h uct_md, const uct_iov_t *iov,
+                                      size_t iovcnt, size_t repeat_count,
+                                      uct_mem_h *memh_p)
+{
+    uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
+
+    return md->ops->mem_reg_nc(md, iov, iovcnt, repeat_count, memh_p);
+}
+
 static ucs_status_t uct_ib_mem_dereg(uct_md_h uct_md, uct_mem_h memh)
 {
     uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
@@ -853,6 +862,7 @@ static uct_md_ops_t uct_ib_md_ops = {
     .close              = uct_ib_md_close,
     .query              = uct_ib_md_query,
     .mem_reg            = uct_ib_mem_reg,
+    .mem_reg_nc         = uct_ib_mem_reg_noncontig,
     .mem_dereg          = uct_ib_mem_dereg,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
@@ -905,6 +915,7 @@ static uct_md_ops_t uct_ib_md_rcache_ops = {
     .close              = uct_ib_md_close,
     .query              = uct_ib_md_query,
     .mem_reg            = uct_ib_mem_rcache_reg,
+    .mem_reg_nc         = uct_ib_mem_reg_noncontig,
     .mem_dereg          = uct_ib_mem_rcache_dereg,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
@@ -1632,6 +1643,7 @@ static uct_ib_md_ops_t uct_ib_verbs_md_ops = {
     .reg_multithreaded   = (uct_ib_md_reg_multithreaded_func_t)ucs_empty_function_return_unsupported,
     .dereg_multithreaded = (uct_ib_md_dereg_multithreaded_func_t)ucs_empty_function_return_unsupported,
     .mem_prefetch        = (uct_ib_md_mem_prefetch_func_t)ucs_empty_function_return_success,
+    .mem_reg_nc          = (uct_ib_md_mem_reg_nc_func_t)ucs_empty_function_return_success
 };
 
 UCT_IB_MD_OPS(uct_ib_verbs_md_ops, 0);

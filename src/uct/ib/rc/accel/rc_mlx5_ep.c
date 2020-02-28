@@ -339,6 +339,9 @@ ucs_status_t uct_rc_mlx5_ep_am_zcopy(uct_ep_h tl_ep, uint8_t id, const void *hea
                                iface->super.super.config.seg_size, 0);
     UCT_RC_CHECK_FC(&iface->super, &ep->super, id);
 
+    ucs_info("rc_mlx5_am_zcopy: numiov %ld totallen %ld, comp %p",
+             iovcnt, header_length + uct_iov_total_length(iov, iovcnt), comp);
+
     status = uct_rc_mlx5_ep_zcopy_post(ep, MLX5_OPCODE_SEND, iov, iovcnt,
                                        id, header, header_length, 0, 0, 0ul, 0, 0,
                                        MLX5_WQE_CTRL_SOLICITED, comp);

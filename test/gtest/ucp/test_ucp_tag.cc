@@ -423,11 +423,8 @@ class test_ucp_tag_struct : public test_ucp_tag {
 UCS_TEST_P(test_ucp_tag_struct, basic)
 {
     ucp_struct_dt_desc_t desc[2];
-    ucp_datatype_t dt1, dt2;
-    char sendbuf[1024];
-
-    send_b(sendbuf, 1, ucp_dt_make_contig(1), 0, 0);
-    ucs_info("sendbuffer %p", sendbuf);
+    ucp_datatype_t dt1;
+    char sendbuf[1024], rbuf[1024];
 
     /* 0       4       8       12        16
      * -----------------------------------------
@@ -436,23 +433,18 @@ UCS_TEST_P(test_ucp_tag_struct, basic)
      * -----------------------------------------
      */
     desc[0].displ  = 0;
-    desc[0].extent = 4;
+    desc[0].extent = 8;
     desc[0].dt     = ucp_dt_make_contig(4);
 
     desc[1].displ  = 16;
     desc[1].extent = 1;
     desc[1].dt     = ucp_dt_make_contig(1);
-    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 1, 1, &dt1));
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 1, &dt1));
 
-    desc[0].displ  = 0;
-    desc[0].extent = 16;
-    desc[0].dt     = dt1;
-    desc[1].displ  = 1024;
-    desc[1].extent = 8;
-    desc[1].dt     = ucp_dt_make_contig(1);
-    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 1, &dt2));
-
+    request *req = recv_nb(rbuf, 1024, ucp_dt_make_contig(1), 0, UCP_TAG_MASK_FULL , 0);
     send_b(sendbuf, 1, dt1, 0, 0);
+    wait_and_validate(req);
+
 }
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_tag_struct, rcx,    "rc_x")

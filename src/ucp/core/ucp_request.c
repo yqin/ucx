@@ -271,7 +271,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
 
         /* register contig memory block covering the whole struct */
-        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer, 1024,//s->len*10,
+        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer, s->extent,
                                    UCT_MD_MEM_ACCESS_ALL, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
                                    state->dt.struct_dt.contig.memh,
@@ -281,13 +281,19 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                       ucs_status_string(status));
             return status;
         }
-        ucs_info("registered contig memh for %p struct, len %ld, memh %p",
-                 s, s->len, state->dt.struct_dt.contig.memh[0]);
+        ucs_info("registered contig memh for %p struct, len %ld, ext %ld memh %p",
+                 s, s->len, s->extent, state->dt.struct_dt.contig.memh[0]);
 
+        /*
         status = ucp_dt_struct_register_ep(req_dbg->send.ep, lane, buffer, datatype,
-                                           state->dt.struct_dt.contig.memh[0], /* revise md */
+                                           state->dt.struct_dt.contig.memh[0], // revise md
                                            state->dt.struct_dt.non_contig.memh,
                                            &state->dt.struct_dt.non_contig.md_map);
+                                              */
+        status = ucp_dt_struct_register(context->tl_mds[md_idx].md, buffer, datatype,
+                                        state->dt.struct_dt.contig.memh[0],
+                                        state->dt.struct_dt.non_contig.memh,
+                                        &state->dt.struct_dt.non_contig.md_map);
         if (status != UCS_OK) {
             goto err;
         }
@@ -327,6 +333,9 @@ UCS_PROFILE_FUNC_VOID(ucp_request_memory_dereg, (context, datatype, state, req_d
             ucs_free(state->dt.iov.dt_reg);
             state->dt.iov.dt_reg = NULL;
         }
+        break;
+    case UCP_DATATYPE_STRUCT:
+        ucp_request_dt_dereg(context, &state->dt.struct_dt.contig, 1, req_dbg);
         break;
     default:
         break;

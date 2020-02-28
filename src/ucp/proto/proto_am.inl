@@ -224,6 +224,8 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
         iov[0].length = length_max;
         iov[0].stride = 0;
         iov[0].count  = 1;
+        *iovcnt       = 1;
+        length_it     = iov[0].length;
         break;
     default:
         ucs_error("Invalid data type");
@@ -251,6 +253,8 @@ ucs_status_t ucp_do_am_zcopy_single(uct_pending_req_t *self, uint8_t am_id,
                         &state, req->send.buffer, req->send.datatype,
                         req->send.length, ucp_ep_md_index(ep, req->send.lane), NULL);
 
+    ucs_info("am_zcopy, dt %ld, length %ld, iovcnt %ld",
+             req->send.datatype & UCP_DATATYPE_CLASS_MASK, req->send.length, iovcnt);
     status = uct_ep_am_zcopy(ep->uct_eps[req->send.lane], am_id, (void*)hdr,
                              hdr_size, iov, iovcnt, 0,
                              &req->send.state.uct_comp);

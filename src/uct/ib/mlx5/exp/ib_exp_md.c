@@ -475,6 +475,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
             ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
         }
     }
+    ucs_info("UMR posted!!!");
 
     /* TODO: check that not needed */
     /* umr->mr->addr       = iov[0].buffer;
@@ -542,6 +543,41 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     ucs_free(umr);
 
     return UCS_OK;
+}
+
+static ucs_status_t uct_ib_mlx5_memreg_nc(uct_ib_md_t *ib_md, const uct_iov_t *iov,
+                                          size_t iovcnt, size_t repeat_count,
+                                          uct_mem_h *memh_p)
+{
+#if HAVE_EXP_UMR
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    ucs_status_t status;
+    uct_ib_mem_t *memh;
+
+    if ((memh_p == NULL) || (repeat_count == 0) || (iovcnt == 0)) {
+        ucs_error("Invalid UMR parameters: memh_p %p, repeat_count %ld, iovcnt %ld",
+                  memh_p, repeat_count, iovcnt);
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    ucs_info("reg NC on MD(%p): %p, iovs %ld, repeat %ld",
+             md, iov[0].buffer, iovcnt, repeat_count);
+
+    status = uct_ib_mlx5_exp_umr_alloc(md, iov, iovcnt, repeat_count, &memh);
+    if (ucs_unlikely(status != UCS_OK)) {
+        return status;
+    }
+
+    status = uct_ib_mlx5_exp_umr_register(md, memh, md->umr_qp, md->umr_cq, 1);
+    if (ucs_unlikely(status != UCS_OK)) {
+        return status;
+    }
+
+    *memh_p = memh;
+    return UCS_OK;
+#else
+    return UCS_ERR_UNSUPPORTED;
+#endif
 }
 
 static ucs_status_t
@@ -1039,12 +1075,14 @@ static uct_ib_md_ops_t uct_ib_mlx5_md_ops = {
     .cleanup             = uct_ib_mlx5_exp_md_cleanup,
     .memh_struct_size    = sizeof(uct_ib_mlx5_mem_t),
     .reg_key             = uct_ib_mlx5_reg_key,
+    .mem_reg_nc           = uct_ib_mlx5_memreg_nc,
     .dereg_key           = uct_ib_mlx5_dereg_key,
     .reg_atomic_key      = uct_ib_mlx5_exp_reg_atomic_key,
     .dereg_atomic_key    = uct_ib_mlx5_exp_dereg_atomic_key,
     .reg_multithreaded   = uct_ib_mlx5_exp_reg_multithreaded,
     .dereg_multithreaded = uct_ib_mlx5_exp_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
+    .mem_reg_nc          = uct_ib_mlx5_memreg_nc
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_md_ops, 1);

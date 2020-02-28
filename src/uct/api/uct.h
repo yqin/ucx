@@ -2031,6 +2031,11 @@ ucs_status_t uct_md_mem_reg(uct_md_h md, void *address, size_t length,
 ucs_status_t uct_md_mem_dereg(uct_md_h md, uct_mem_h memh);
 
 
+ucs_status_t uct_md_mem_reg_nc(uct_md_h md, const uct_iov_t *iov,
+                               size_t iovcnt, size_t repeat_count,
+                               uct_mem_h *memh_p);
+
+
 /**
  * @ingroup UCT_MD
  * @brief Detect memory type
