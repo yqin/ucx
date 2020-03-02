@@ -754,7 +754,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .reg_multithreaded   = uct_ib_mlx5_devx_reg_multithreaded,
     .dereg_multithreaded = uct_ib_mlx5_devx_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
-    .mem_reg_nc          = (uct_ib_md_mem_reg_nc_func_t)ucs_empty_function_return_success
+    .reg_nc              = (uct_ib_md_mem_reg_nc_func_t)ucs_empty_function_return_success,
+    .dereg_nc            = (uct_ib_md_mem_dereg_nc_func_t)ucs_empty_function_return_success
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_devx_md_ops, 2);

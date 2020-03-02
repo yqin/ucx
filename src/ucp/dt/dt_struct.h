@@ -12,7 +12,12 @@
 #include <src/uct/api/uct.h>
 #include <ucp/core/ucp_types.h>
 
-KHASH_MAP_INIT_INT64(dt_struct, uct_mem_h)
+typedef struct ucp_dt_struct_hash_value {
+    uct_md_h      md;
+    uct_mem_h     memh;
+} ucp_dt_struct_hash_value_t;
+
+KHASH_MAP_INIT_INT64(dt_struct, ucp_dt_struct_hash_value_t)
 /*
 int main() {
     int ret, is_missing;
@@ -74,7 +79,7 @@ static UCS_F_ALWAYS_INLINE uct_mem_h ucp_dt_struct_in_cache(ucp_dt_struct_t *s,
     khiter_t k;
     k = kh_get(dt_struct, &s->hash, (uint64_t)ptr);
 
-    return (k == kh_end(&s->hash)) ? NULL : kh_value(&s->hash, k);
+    return (k == kh_end(&s->hash)) ? NULL : kh_value(&s->hash, k).memh;
 }
 
 

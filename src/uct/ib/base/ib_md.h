@@ -283,6 +283,9 @@ typedef ucs_status_t (*uct_ib_md_mem_reg_nc_func_t)(uct_ib_md_t *md,
                                                     size_t repeat_count,
                                                     uct_mem_h *memh_p);
 
+typedef ucs_status_t (*uct_ib_md_mem_dereg_nc_func_t)(uct_ib_md_t *md,
+                                                     uct_mem_h memh);
+
 typedef struct uct_ib_md_ops {
     uct_ib_md_open_func_t                open;
     uct_ib_md_cleanup_func_t             cleanup;
@@ -296,7 +299,8 @@ typedef struct uct_ib_md_ops {
     uct_ib_md_reg_multithreaded_func_t   reg_multithreaded;
     uct_ib_md_dereg_multithreaded_func_t dereg_multithreaded;
     uct_ib_md_mem_prefetch_func_t        mem_prefetch;
-    uct_ib_md_mem_reg_nc_func_t          mem_reg_nc;
+    uct_ib_md_mem_reg_nc_func_t          reg_nc;
+    uct_ib_md_mem_dereg_nc_func_t        dereg_nc;
 } uct_ib_md_ops_t;
 
 

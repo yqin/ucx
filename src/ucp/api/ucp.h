@@ -3104,6 +3104,8 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
                                   size_t desc_count, size_t rep_count,
                                   ucp_datatype_t *datatype_p);
 
+void ucp_dt_destroy_struct(ucp_datatype_t datatype_p);
+
 #if 0
 /* Stride of iovs would represent interleave type:
  * iov(3): i1, i2, i3

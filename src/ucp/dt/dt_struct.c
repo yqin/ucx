@@ -43,7 +43,8 @@ static void _set_length(ucp_dt_struct_t *s)
             break;
         case UCP_DATATYPE_STRUCT:
             length += ucp_dt_struct_length(ucp_dt_struct(dsc->dt));
-            iovs   += ucp_dt_struct(dsc->dt)->uct_iov_count;
+            iovs   += ucp_dt_struct(dsc->dt)->rep_count == 1 ?
+                      ucp_dt_struct(dsc->dt)->uct_iov_count : 1;
             break;
         case UCP_DATATYPE_IOV:
         case UCP_DATATYPE_GENERIC:
@@ -254,6 +255,8 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
         return UCS_ERR_NO_MEMORY;
     }
 
+    kh_init_inplace(dt_struct, &dt->hash);
+
     memcpy(dt->desc, desc_ptr, sizeof(*desc_ptr) * desc_count);
     dt->desc_count = desc_count;
     dt->rep_count = rep_count;
@@ -261,16 +264,26 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
     _set_depth(dt);
     *datatype_p = ((uintptr_t)dt) | UCP_DATATYPE_STRUCT;
 
-    ucs_info("Created struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld",
-             dt, dt->len, dt->step_len, dt->depth, dt->uct_iov_count);
+    ucs_info("Created struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld, rep count %ld",
+             dt, dt->len, dt->step_len, dt->depth, dt->uct_iov_count, dt->rep_count);
 
     return UCS_OK;
 }
 
 void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
 {
-    ucp_dt_struct_t *dt;
-    dt = ucp_dt_struct(datatype_p);
+    ucp_dt_struct_t *dt = ucp_dt_struct(datatype_p);
+    ucp_dt_struct_hash_value_t val;
+
+    ucs_info("Destroy struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld",
+             dt, dt->len, dt->step_len, dt->depth, dt->uct_iov_count);
+
+    kh_foreach_value(&dt->hash, val, {
+        ucs_info("struct dt %p, dereg NC memh %p on md %p",
+                 dt, val.memh, val.md);
+        uct_md_mem_dereg_nc(val.md, val.memh);
+    })
+    kh_destroy_inplace(dt_struct, &dt->hash);
     ucs_free(dt->desc);
     ucs_free(dt);
 }
@@ -308,14 +321,19 @@ size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt,
 
 /* Dealing with UCT */
 
-inline static void _to_cache(ucp_dt_struct_t *s, void *ptr, uct_mem_h memh)
+inline static void _to_cache(ucp_dt_struct_t *s, void *ptr, uct_md_h md,
+                             uct_mem_h memh)
 {
+    ucp_dt_struct_hash_value_t val = {md, memh};
     khiter_t k;
     int ret;
 
     k = kh_put(dt_struct, &s->hash, (uint64_t)ptr, &ret);
+    ucs_assert_always((ret == 1) || (ret == 2));
     /* TODO: check ret */
-    kh_value(&s->hash, k) = memh;
+    kh_value(&s->hash, k) = val;
+
+    ucs_info("dt %p adding to cache (buf %p md %p memh %p)", s, ptr, md, memh);
 }
 
 #if 0
@@ -409,6 +427,7 @@ ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
     ucp_dt_struct_t *s    = ucp_dt_struct(dt);
     uct_ep_h uct_ep       = ep->uct_eps[lane];
     ucp_md_index_t md_idx = ucp_ep_md_index(ep, lane);
+    uct_md_h md           = ep->worker->context->tl_mds[md_idx].md;
     ucs_status_t status;
 
     ucs_assert_always(UCP_DT_IS_STRUCT(dt));
@@ -418,7 +437,7 @@ ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
     status = _struct_register_ep_rec(uct_ep, buf, s, contig_memh, memh);
     if (status == UCS_OK) {
         *md_map_p = UCS_BIT(md_idx);
-        _to_cache(s, buf, memh[0]);
+        _to_cache(s, buf, md, memh[0]);
 
     }
 
@@ -496,7 +515,7 @@ ucs_status_t ucp_dt_struct_register(uct_md_h md, void *buf, ucp_datatype_t dt,
     status = _struct_register_rec(md, buf, s, contig_memh, memh);
     if (status == UCS_OK) {
         //*md_map_p = UCS_BIT(md_idx);
-        _to_cache(s, buf, memh[0]);
+        _to_cache(s, buf, md, memh[0]);
 
     }
 

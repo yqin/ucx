@@ -260,7 +260,8 @@ ucp_request_send_state_init(ucp_request_t *req, ucp_datatype_t datatype,
         req->send.state.dt.dt.generic.state = state_gen;
         return;
     case UCP_DATATYPE_STRUCT:
-        /* TODO: initialize the state for packing */
+        req->send.state.dt.dt.struct_dt.contig.md_map     = 0;
+        req->send.state.dt.dt.struct_dt.non_contig.md_map = 0;
         return;
     default:
         ucs_fatal("Invalid data type");

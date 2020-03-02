@@ -113,6 +113,7 @@ uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     for (iov_idx = 0, umr_depth = 0; iov_idx < iovcnt; iov_idx++) {
         uct_mem_h iov_memh = iov[iov_idx].memh;
         if (ucs_unlikely(!iov_memh)) {
+            ucs_error("Invalid memh in UCT iov");
             return UCS_ERR_INVALID_PARAM;
         }
 
@@ -120,6 +121,8 @@ uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
         iov_depth = ((uct_ib_mlx5_mem_t*)(iov_memh))->umr_depth;
         if (iov_depth > umr_depth) {
             if (iov_depth >= max_depth) {
+                ucs_error("iov depth (%d) is bigger than max (%d)",
+                          iov_depth, umr_depth);
                 return UCS_ERR_UNSUPPORTED;
             }
             umr_depth = iov_depth;
@@ -268,6 +271,7 @@ uct_ib_mlx5_exp_umr_fill_repeated(uct_ib_umr_t *umr, const uct_iov_t *iov,
 {
     struct ibv_exp_send_wr *wr = &umr->wr;
     struct ibv_exp_mem_repeat_block *mem_rep_list;
+    uint64_t base_addr = SIZE_MAX;
     int i;
 
     memset(wr, 0, sizeof(*wr));
@@ -295,8 +299,13 @@ uct_ib_mlx5_exp_umr_fill_repeated(uct_ib_umr_t *umr, const uct_iov_t *iov,
         mem_rep_list[i].base_addr     = (uint64_t)iov[i].buffer;
         mem_rep_list[i].byte_count[0] = iov[i].length;
         mem_rep_list[i].stride[0]     = iov[i].stride;
+        base_addr                     = ucs_min(mem_rep_list[i].base_addr, base_addr);
+        ucs_info("fill_replist(%d): addr %p(%ld), len %ld, stride %ld mr %p (memh %p)",
+                 i,iov[i].buffer,  mem_rep_list[i].base_addr , iov[i].length,
+                 iov[i].stride, mem_rep_list[i].mr, iov[i].memh);
     }
 
+    umr->base_addr                                   = base_addr;
     wr->ext_op.umr.umr_type                          = IBV_EXP_UMR_REPEAT;
     wr->ext_op.umr.mem_list.rb.mem_repeat_block_list = mem_rep_list;
     wr->ext_op.umr.mem_list.rb.repeat_count          = &umr->repeat_count;
@@ -320,6 +329,7 @@ uct_ib_mlx5_exp_umr_fill_region(uct_ib_umr_t *umr, const uct_iov_t *iov,
                                 size_t iov_count)
 {
     struct ibv_exp_mem_region *mem_reg;
+    uint64_t base_addr = SIZE_MAX;
     int i;
 
     mem_reg = ucs_calloc(iov_count, sizeof(*mem_reg), "UMR memreg");
@@ -331,10 +341,12 @@ uct_ib_mlx5_exp_umr_fill_region(uct_ib_umr_t *umr, const uct_iov_t *iov,
         mem_reg[i].base_addr = (uint64_t)iov[i].buffer; /* mr->addr? */
         mem_reg[i].length    = iov[i].length;
         mem_reg[i].mr        = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
+        base_addr            = ucs_min(mem_reg[i].base_addr, base_addr);
         ucs_info("fill_region(%d): addr %p(%ld), len %ld mr %p (memh %p)",
                  i,iov[i].buffer,  mem_reg[i].base_addr , mem_reg[i].length, mem_reg[i].mr, iov[i].memh);
     }
 
+    umr->base_addr                           = base_addr;
     umr->wr.ext_op.umr.umr_type              = IBV_EXP_UMR_MR_LIST;
     umr->wr.ext_op.umr.mem_list.mem_reg_list = mem_reg;
 
@@ -372,7 +384,6 @@ uct_ib_mlx5_exp_umr_alloc(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     umr->repeat_count = repeat_count;
     umr->depth        = umr_depth;
     umr->iov_count    = iov_count;
-    umr->base_addr    = (uint64_t)iov[0].buffer;
     umr->comp.count   = 1; /* for async reg */
     umr->memh.umr     = umr;
 
@@ -545,7 +556,7 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     return UCS_OK;
 }
 
-static ucs_status_t uct_ib_mlx5_memreg_nc(uct_ib_md_t *ib_md, const uct_iov_t *iov,
+static ucs_status_t uct_ib_mlx5_mem_reg_nc(uct_ib_md_t *ib_md, const uct_iov_t *iov,
                                           size_t iovcnt, size_t repeat_count,
                                           uct_mem_h *memh_p)
 {
@@ -578,6 +589,28 @@ static ucs_status_t uct_ib_mlx5_memreg_nc(uct_ib_md_t *ib_md, const uct_iov_t *i
 #else
     return UCS_ERR_UNSUPPORTED;
 #endif
+}
+
+static ucs_status_t uct_ib_mlx5_mem_dereg_nc(uct_ib_md_t *ib_md, uct_mem_h memh)
+{
+#if HAVE_EXP_UMR
+    uct_ib_mlx5_md_t *md  = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mem_t *ib_memh = (uct_ib_mem_t*)memh;
+    ucs_status_t status;
+
+    status = uct_ib_mlx5_exp_umr_deregister(ib_memh, md->umr_qp, md->umr_cq);
+    if (status != UCS_OK) {
+        ucs_error("failed to deregister NC memory: %s",
+                  ucs_status_string(status));
+    }
+
+    ucs_info("UMR deregistered, md %p memh %p", ib_md, memh);
+
+    return status;
+#else
+    return UCS_ERR_UNSUPPORTED;
+#endif
+
 }
 
 static ucs_status_t
@@ -1075,14 +1108,14 @@ static uct_ib_md_ops_t uct_ib_mlx5_md_ops = {
     .cleanup             = uct_ib_mlx5_exp_md_cleanup,
     .memh_struct_size    = sizeof(uct_ib_mlx5_mem_t),
     .reg_key             = uct_ib_mlx5_reg_key,
-    .mem_reg_nc           = uct_ib_mlx5_memreg_nc,
     .dereg_key           = uct_ib_mlx5_dereg_key,
     .reg_atomic_key      = uct_ib_mlx5_exp_reg_atomic_key,
     .dereg_atomic_key    = uct_ib_mlx5_exp_dereg_atomic_key,
     .reg_multithreaded   = uct_ib_mlx5_exp_reg_multithreaded,
     .dereg_multithreaded = uct_ib_mlx5_exp_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
-    .mem_reg_nc          = uct_ib_mlx5_memreg_nc
+    .reg_nc              = uct_ib_mlx5_mem_reg_nc,
+    .dereg_nc            = uct_ib_mlx5_mem_dereg_nc
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_md_ops, 1);

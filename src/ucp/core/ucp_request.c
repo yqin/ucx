@@ -261,17 +261,21 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         state->dt.iov.dt_reg = dt_reg;
         break;
     case UCP_DATATYPE_STRUCT:
-        s = ucp_dt_struct(datatype);
+        s       = ucp_dt_struct(datatype);
         nc_memh = ucp_dt_struct_in_cache(s, buffer);
         if (ucs_likely(nc_memh != NULL)) {
+            ucs_info("register dt struct %p buf %p, found in cache, memh %p",
+                     s, buffer, nc_memh);
             /* SET memh properly */
+            state->dt.struct_dt.contig.memh[0] = nc_memh;
             return UCS_OK;
         }
 
         md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
 
         /* register contig memory block covering the whole struct */
-        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer, s->extent,
+        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer,
+                                   s->extent * s->rep_count,
                                    UCT_MD_MEM_ACCESS_ALL, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
                                    state->dt.struct_dt.contig.memh,
@@ -281,8 +285,9 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                       ucs_status_string(status));
             return status;
         }
-        ucs_info("registered contig memh for %p struct, len %ld, ext %ld memh %p",
-                 s, s->len, s->extent, state->dt.struct_dt.contig.memh[0]);
+        ucs_info("registered contig memh for %p struct, buf %p, len %ld, ext %ld memh %p repcnt %ld",
+                 s, buffer, s->len, s->extent, state->dt.struct_dt.contig.memh[0],
+                  s->rep_count);
 
         /*
         status = ucp_dt_struct_register_ep(req_dbg->send.ep, lane, buffer, datatype,
