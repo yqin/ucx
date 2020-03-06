@@ -113,6 +113,7 @@ uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     for (iov_idx = 0, umr_depth = 0; iov_idx < iovcnt; iov_idx++) {
         uct_mem_h iov_memh = iov[iov_idx].memh;
         if (ucs_unlikely(!iov_memh)) {
+            ucs_error("Invalid memh in UCT iov");
             return UCS_ERR_INVALID_PARAM;
         }
 
@@ -120,6 +121,8 @@ uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
         iov_depth = ((uct_ib_mlx5_mem_t*)(iov_memh))->umr_depth;
         if (iov_depth > umr_depth) {
             if (iov_depth >= max_depth) {
+                ucs_error("iov depth (%d) is bigger than max (%d)",
+                          iov_depth, umr_depth);
                 return UCS_ERR_UNSUPPORTED;
             }
             umr_depth = iov_depth;
@@ -268,27 +271,56 @@ uct_ib_mlx5_exp_umr_fill_repeated(uct_ib_umr_t *umr, const uct_iov_t *iov,
 {
     struct ibv_exp_send_wr *wr = &umr->wr;
     struct ibv_exp_mem_repeat_block *mem_rep_list;
+    uint64_t base_addr = SIZE_MAX;
     int i;
 
     memset(wr, 0, sizeof(*wr));
     mem_rep_list = ucs_calloc(iov_count, sizeof(*mem_rep_list), "UMR memlist");
     if (mem_rep_list == NULL) {
-        ucs_fatal("can't allocated mem_repeat_block for UMR");
+        ucs_error("can't allocated mem_repeat_block for UMR");
+        goto err_no_mem;
     }
 
     for(i = 0; i < iov_count; ++i) {
+        mem_rep_list[i].byte_count = ucs_calloc(1,
+                                                sizeof(mem_rep_list[i].byte_count[0]),
+                                                "byte_count");
+        if (mem_rep_list[i].byte_count == NULL) {
+            ucs_error("failed to allocate byte_cnt for mem_rep_list");
+            goto err_clean_mem_rep_list;
+        }
+        mem_rep_list[i].stride = ucs_calloc(1, sizeof(mem_rep_list[i].stride[0]),
+                                            "stride");
+        if (mem_rep_list[i].stride == NULL) {
+            ucs_error("failed to allocate stride for mem_rep_list");
+            goto err_clean_mem_rep_list;
+        }
         mem_rep_list[i].mr            = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
         mem_rep_list[i].base_addr     = (uint64_t)iov[i].buffer;
         mem_rep_list[i].byte_count[0] = iov[i].length;
         mem_rep_list[i].stride[0]     = iov[i].stride;
+        base_addr                     = ucs_min(mem_rep_list[i].base_addr, base_addr);
+        ucs_info("fill_replist(%d): addr %p(%ld), len %ld, stride %ld mr %p (memh %p)",
+                 i,iov[i].buffer,  mem_rep_list[i].base_addr , iov[i].length,
+                 iov[i].stride, mem_rep_list[i].mr, iov[i].memh);
     }
 
+    umr->base_addr                                   = base_addr;
     wr->ext_op.umr.umr_type                          = IBV_EXP_UMR_REPEAT;
     wr->ext_op.umr.mem_list.rb.mem_repeat_block_list = mem_rep_list;
     wr->ext_op.umr.mem_list.rb.repeat_count          = &umr->repeat_count;
     wr->ext_op.umr.mem_list.rb.stride_dim            = 1;
 
     return UCS_OK;
+
+err_clean_mem_rep_list:
+    for (i = 0; i < iov_count; ++i) {
+        ucs_free(mem_rep_list[i].byte_count);
+        ucs_free(mem_rep_list[i].stride);
+    }
+    ucs_free(mem_rep_list);
+err_no_mem:
+    return UCS_ERR_NO_MEMORY;
 }
 
 /* TODO: Support KSM */
@@ -297,6 +329,7 @@ uct_ib_mlx5_exp_umr_fill_region(uct_ib_umr_t *umr, const uct_iov_t *iov,
                                 size_t iov_count)
 {
     struct ibv_exp_mem_region *mem_reg;
+    uint64_t base_addr = SIZE_MAX;
     int i;
 
     mem_reg = ucs_calloc(iov_count, sizeof(*mem_reg), "UMR memreg");
@@ -308,8 +341,12 @@ uct_ib_mlx5_exp_umr_fill_region(uct_ib_umr_t *umr, const uct_iov_t *iov,
         mem_reg[i].base_addr = (uint64_t)iov[i].buffer; /* mr->addr? */
         mem_reg[i].length    = iov[i].length;
         mem_reg[i].mr        = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
+        base_addr            = ucs_min(mem_reg[i].base_addr, base_addr);
+        ucs_info("fill_region(%d): addr %p(%ld), len %ld mr %p (memh %p)",
+                 i,iov[i].buffer,  mem_reg[i].base_addr , mem_reg[i].length, mem_reg[i].mr, iov[i].memh);
     }
 
+    umr->base_addr                           = base_addr;
     umr->wr.ext_op.umr.umr_type              = IBV_EXP_UMR_MR_LIST;
     umr->wr.ext_op.umr.mem_list.mem_reg_list = mem_reg;
 
@@ -342,18 +379,18 @@ uct_ib_mlx5_exp_umr_alloc(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     if (umr == NULL) {
         ucs_fatal("can't allocate UMR");
     }
+    memset(&umr->wr, 0, sizeof(umr->wr));
 
     umr->repeat_count = repeat_count;
     umr->depth        = umr_depth;
     umr->iov_count    = iov_count;
-    umr->base_addr    = (uint64_t)iov[0].buffer;
     umr->comp.count   = 1; /* for async reg */
     umr->memh.umr     = umr;
 
     if (repeat_count == 1) { /* MRs list */
-        status = uct_ib_mlx5_exp_umr_fill_repeated(umr, iov, iov_count);
-    } else { /* stride/interleave */
         status = uct_ib_mlx5_exp_umr_fill_region(umr, iov, iov_count);
+    } else { /* stride/interleave */
+        status = uct_ib_mlx5_exp_umr_fill_repeated(umr, iov, iov_count);
     }
 
     *memh_p = &umr->memh.super;
@@ -397,7 +434,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     }
 */
     /* Fill indirect MR */
-    umr->is_inline = (umr->iov_count > md->super.config.max_inline_klm_list);
+    umr->is_inline = (umr->iov_count <= md->super.config.max_inline_klm_list);
 
     /* If the list exceeds max inline size, allocate a container object */
     if (umr->is_inline) {
@@ -424,11 +461,16 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     wr->ext_op.umr.num_mrs     = umr->iov_count;
     wr->ext_op.umr.base_addr   = umr->base_addr;
 
+
     /* Post UMR */
     ret = ibv_exp_post_send(qp, wr, &bad_wr);
     if (ret) {
         ucs_fatal("ibv_exp_post_send(UMR_FILL) failed: %m");
     }
+    ucs_info("num_mrs %d, base_addr %p, inline %d, type %d",
+             wr->ext_op.umr.num_mrs,
+             (void*)(uintptr_t)wr->ext_op.umr.base_addr, umr->is_inline,
+             wr->ext_op.umr.umr_type);
 
     /* Wait for send UMR completion */
     for (;;) {
@@ -444,6 +486,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
             ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
         }
     }
+    ucs_info("UMR posted!!!");
 
     /* TODO: check that not needed */
     /* umr->mr->addr       = iov[0].buffer;
@@ -511,6 +554,63 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     ucs_free(umr);
 
     return UCS_OK;
+}
+
+static ucs_status_t uct_ib_mlx5_mem_reg_nc(uct_ib_md_t *ib_md, const uct_iov_t *iov,
+                                          size_t iovcnt, size_t repeat_count,
+                                          uct_mem_h *memh_p)
+{
+#if HAVE_EXP_UMR
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    ucs_status_t status;
+    uct_ib_mem_t *memh;
+
+    if ((memh_p == NULL) || (repeat_count == 0) || (iovcnt == 0)) {
+        ucs_error("Invalid UMR parameters: memh_p %p, repeat_count %ld, iovcnt %ld",
+                  memh_p, repeat_count, iovcnt);
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    ucs_info("reg NC on MD(%p): %p, iovs %ld, repeat %ld",
+             md, iov[0].buffer, iovcnt, repeat_count);
+
+    status = uct_ib_mlx5_exp_umr_alloc(md, iov, iovcnt, repeat_count, &memh);
+    if (ucs_unlikely(status != UCS_OK)) {
+        return status;
+    }
+
+    status = uct_ib_mlx5_exp_umr_register(md, memh, md->umr_qp, md->umr_cq, 1);
+    if (ucs_unlikely(status != UCS_OK)) {
+        return status;
+    }
+
+    *memh_p = memh;
+    return UCS_OK;
+#else
+    return UCS_ERR_UNSUPPORTED;
+#endif
+}
+
+static ucs_status_t uct_ib_mlx5_mem_dereg_nc(uct_ib_md_t *ib_md, uct_mem_h memh)
+{
+#if HAVE_EXP_UMR
+    uct_ib_mlx5_md_t *md  = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mem_t *ib_memh = (uct_ib_mem_t*)memh;
+    ucs_status_t status;
+
+    status = uct_ib_mlx5_exp_umr_deregister(ib_memh, md->umr_qp, md->umr_cq);
+    if (status != UCS_OK) {
+        ucs_error("failed to deregister NC memory: %s",
+                  ucs_status_string(status));
+    }
+
+    ucs_info("UMR deregistered, md %p memh %p", ib_md, memh);
+
+    return status;
+#else
+    return UCS_ERR_UNSUPPORTED;
+#endif
+
 }
 
 static ucs_status_t
@@ -1014,6 +1114,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_md_ops = {
     .reg_multithreaded   = uct_ib_mlx5_exp_reg_multithreaded,
     .dereg_multithreaded = uct_ib_mlx5_exp_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
+    .reg_nc              = uct_ib_mlx5_mem_reg_nc,
+    .dereg_nc            = uct_ib_mlx5_mem_dereg_nc
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_md_ops, 1);

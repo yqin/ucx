@@ -44,7 +44,9 @@ typedef struct ucp_dt_state {
             void                  *state;
         } generic;
         struct {
-            void                  *state;
+            ucp_dt_reg_t          contig;     /* memh for contig space covering
+                                                 all struct*/
+            ucp_dt_reg_t          non_contig; /* indirect memh (umr) */
         } struct_dt;
     } dt;
 } ucp_dt_state_t;

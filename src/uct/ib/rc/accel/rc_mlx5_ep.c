@@ -339,6 +339,9 @@ ucs_status_t uct_rc_mlx5_ep_am_zcopy(uct_ep_h tl_ep, uint8_t id, const void *hea
                                iface->super.super.config.seg_size, 0);
     UCT_RC_CHECK_FC(&iface->super, &ep->super, id);
 
+    ucs_info("rc_mlx5_am_zcopy: numiov %ld totallen %ld, comp %p",
+             iovcnt, header_length + uct_iov_total_length(iov, iovcnt), comp);
+
     status = uct_rc_mlx5_ep_zcopy_post(ep, MLX5_OPCODE_SEND, iov, iovcnt,
                                        id, header, header_length, 0, 0, 0ul, 0, 0,
                                        MLX5_WQE_CTRL_SOLICITED, comp);
@@ -372,6 +375,9 @@ ucs_status_t uct_rc_mlx5_ep_mem_reg_nc(uct_ep_h tl_ep, const uct_iov_t *iov,
      * so far */
     UCT_RC_CHECK_RES(&iface->super, &ep->super);
 
+    ucs_info("reg NC: %p, iovs %ld, repeat %ld",
+             iov[0].buffer, iovcnt, repeat_count);
+
     status = uct_ib_mlx5_exp_umr_alloc(md, iov, iovcnt, repeat_count, &memh);
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
@@ -379,8 +385,9 @@ ucs_status_t uct_rc_mlx5_ep_mem_reg_nc(uct_ep_h tl_ep, const uct_iov_t *iov,
 
     /* Register UMR on EP qp for now. No need to wait for completion in this
      * case, but the overall register time needs to be improved overall. */
-    status = uct_ib_mlx5_exp_umr_register(md, memh, ep->tx.wq.super.verbs.qp,
-                                          iface->super.super.cq[UCT_IB_DIR_TX], 1);
+    //status = uct_ib_mlx5_exp_umr_register(md, memh, ep->tx.wq.super.verbs.qp,
+    //                                      iface->super.super.cq[UCT_IB_DIR_TX], 1);
+    status = uct_ib_mlx5_exp_umr_register(md, memh, md->umr_qp, md->umr_cq, 1);
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
     }

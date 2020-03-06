@@ -412,3 +412,171 @@ UCS_TEST_P(test_ucp_tag_limits, check_max_short_zcopy_thresh_zero, "ZCOPY_THRESH
 }
 
 UCP_INSTANTIATE_TEST_CASE(test_ucp_tag_limits)
+
+
+class test_ucp_tag_struct : public test_ucp_tag {
+public:
+    struct Generator {
+        Generator() : m_value( 0 ) { }
+        char operator()() { return m_value++; }
+        char m_value;
+    };
+
+    void init() {
+        test_ucp_tag::init();
+    }
+};
+
+UCS_TEST_P(test_ucp_tag_struct, basic)
+{
+    ucp_struct_dt_desc_t desc[2];
+    ucp_datatype_t dt1;
+    std::vector<char> sendbuf(1024);
+    std::vector<char> rbuf(1024, 0);
+    std::vector<char> pat;
+
+    std::generate(sendbuf.begin(), sendbuf.end(), Generator());
+    /* 0       4       8       ...       32
+     * -------------------------------------------
+     * |   4   |                         | 3     |
+     * | bytes |                         | bytes |
+     * -------------------------------------------
+     */
+    desc[0].displ  = 0;
+    desc[0].extent = 8;
+    desc[0].dt     = ucp_dt_make_contig(4);
+
+    desc[1].displ  = 32;
+    desc[1].extent = 4;
+    desc[1].dt     = ucp_dt_make_contig(3);
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 1, &dt1));
+    char pat_fill[] = {0, 1, 2, 3, 32, 33, 34, 0};
+    pat.insert(pat.end(), pat_fill, pat_fill + 8);
+
+    request *req = recv_nb(&rbuf[0], 1024, ucp_dt_make_contig(1), 0, UCP_TAG_MASK_FULL , 0);
+    send_b(&sendbuf[0], 1, dt1, 0, 0);
+    wait_and_validate(req);
+    EXPECT_TRUE(std::equal(pat.begin(), pat.end(), rbuf.begin()));
+
+    ucp_dt_destroy_struct(dt1);
+
+}
+
+UCS_TEST_P(test_ucp_tag_struct, basic_nested)
+{
+    ucp_struct_dt_desc_t desc[2];
+    ucp_datatype_t dt1;
+    std::vector<char> sendbuf(1024);
+    std::vector<char> rbuf(1024, 0);
+    std::vector<char> pat;
+
+    std::generate(sendbuf.begin(), sendbuf.end(), Generator());
+    /* 0       4       8       ...       32
+     * -------------------------------------------
+     * |   4   |                         | 3     |
+     * | bytes |                         | bytes |
+     * -------------------------------------------
+     */
+    desc[0].displ  = 0;
+    desc[0].extent = 8;
+    desc[0].dt     = ucp_dt_make_contig(4);
+
+    desc[1].displ  = 32;
+    desc[1].extent = 4;
+    desc[1].dt     = ucp_dt_make_contig(3);
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 1, &dt1));
+
+    desc[0].displ  = 8;
+    desc[0].extent = 8;
+    desc[0].dt     = ucp_dt_make_contig(5);
+    desc[1].displ  = 0;
+    desc[1].extent = 128;
+    desc[1].dt     = dt1;
+
+    ucp_datatype_t dt2;
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 1, &dt2));
+
+    char pat_fill[] = {8, 9, 10, 11, 12, 0, 1, 2, 3, 32, 33, 34, 0};
+    pat.insert(pat.end(), pat_fill, pat_fill + 13);
+
+    request *req = recv_nb(&rbuf[0], 1024, ucp_dt_make_contig(1), 0, UCP_TAG_MASK_FULL , 0);
+    send_b(&sendbuf[0], 1, dt2, 0, 0);
+    wait_and_validate(req);
+
+    EXPECT_TRUE(std::equal(pat.begin(), pat.end(), rbuf.begin()));
+
+    ucp_dt_destroy_struct(dt1);
+    ucp_dt_destroy_struct(dt2);
+}
+
+UCS_TEST_P(test_ucp_tag_struct, interleave)
+{
+    ucp_struct_dt_desc_t desc[2];
+    ucp_datatype_t dt1;
+    std::vector<char> sendbuf(1024);
+    std::vector<char> rbuf(1024, 0);
+    std::vector<char> pat;
+
+    std::generate(sendbuf.begin(), sendbuf.end(), Generator());
+    desc[0].displ  = 0;
+    desc[0].extent = 8;
+    desc[0].dt     = ucp_dt_make_contig(4);
+
+    desc[1].displ  = 16;
+    desc[1].extent = 4;
+    desc[1].dt     = ucp_dt_make_contig(2);
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 2, &dt1));
+    char pat_fill[] = {0, 1, 2, 3, 16, 17, 8, 9, 10, 11, 20, 21, 0};
+    pat.insert(pat.end(), pat_fill, pat_fill + 8);
+
+    request *req = recv_nb(&rbuf[0], 1024, ucp_dt_make_contig(1), 0, UCP_TAG_MASK_FULL , 0);
+    send_b(&sendbuf[0], 1, dt1, 0, 0);
+    wait_and_validate(req);
+    EXPECT_TRUE(std::equal(pat.begin(), pat.end(), rbuf.begin()));
+
+    ucp_dt_destroy_struct(dt1);
+
+}
+
+UCS_TEST_P(test_ucp_tag_struct, interleave_nested)
+{
+    ucp_struct_dt_desc_t desc[2];
+    ucp_datatype_t dt1;
+    std::vector<char> sendbuf(1024);
+    std::vector<char> rbuf(1024, 0);
+    std::vector<char> pat;
+
+    std::generate(sendbuf.begin(), sendbuf.end(), Generator());
+    desc[0].displ  = 0;
+    desc[0].extent = 8;
+    desc[0].dt     = ucp_dt_make_contig(4);
+
+    desc[1].displ  = 16;
+    desc[1].extent = 4;
+    desc[1].dt     = ucp_dt_make_contig(2);
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 2, &dt1));
+
+    ucp_datatype_t dt2;
+    desc[0].displ  = 64;
+    desc[0].extent = 8;
+    desc[0].dt     = ucp_dt_make_contig(3);
+    desc[1].displ  = 0;
+    desc[1].extent = 128;
+    desc[1].dt     = dt1;
+    ASSERT_UCS_OK(ucp_dt_create_struct(desc, 2, 1, &dt2));
+
+    char pat_fill[] = {64, 65, 66, 0, 1, 2, 3, 16, 17, 8, 9, 10, 11, 20, 21, 0 };
+    pat.insert(pat.end(), pat_fill, pat_fill + 8);
+
+    request *req = recv_nb(&rbuf[0], 1024, ucp_dt_make_contig(1), 0, UCP_TAG_MASK_FULL , 0);
+    send_b(&sendbuf[0], 1, dt2, 0, 0);
+    wait_and_validate(req);
+    EXPECT_TRUE(std::equal(pat.begin(), pat.end(), rbuf.begin()));
+
+    ucp_dt_destroy_struct(dt1);
+    ucp_dt_destroy_struct(dt2);
+
+}
+
+UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_tag_struct, rcx,    "rc_x")
+

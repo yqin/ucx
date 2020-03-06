@@ -314,6 +314,7 @@ uct_rc_txqp_add_send_comp(uct_rc_iface_t *iface, uct_rc_txqp_t *txqp,
     op->user_comp = comp;
     op->flags    |= flags;
     uct_rc_txqp_add_send_op_sn(txqp, op, sn);
+    ucs_info("added completion: count %d, sn %d, comp %p op %p", comp->count, sn, comp, op);
 }
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
@@ -343,8 +344,10 @@ uct_rc_txqp_add_flush_comp(uct_rc_iface_t *iface, uct_base_ep_t *ep,
 static UCS_F_ALWAYS_INLINE void
 uct_rc_txqp_completion_op(uct_rc_iface_send_op_t *op, const void *resp)
 {
-    ucs_trace_poll("complete op %p sn %d handler %s", op, op->sn,
-                   ucs_debug_get_symbol_name((void*)op->handler));
+    ucs_info("complete op %p sn %d handler %s %p ", op, op->sn,
+                   ucs_debug_get_symbol_name((void*)op->handler),
+                   op->user_comp);
+                  // ucs_debug_get_symbol_name((void*)op->user_comp->func));
     ucs_assert(op->flags & UCT_RC_IFACE_SEND_OP_FLAG_INUSE);
     op->flags &= ~(UCT_RC_IFACE_SEND_OP_FLAG_INUSE |
                    UCT_RC_IFACE_SEND_OP_FLAG_ZCOPY);
@@ -356,7 +359,7 @@ uct_rc_txqp_completion_desc(uct_rc_txqp_t *txqp, uint16_t sn)
 {
     uct_rc_iface_send_op_t *op;
 
-    ucs_trace_poll("txqp %p complete ops up to sn %d", txqp, sn);
+    ucs_info("txqp %p complete ops up to sn %d", txqp, sn);
     ucs_queue_for_each_extract(op, &txqp->outstanding, queue,
                                UCS_CIRCULAR_COMPARE16(op->sn, <=, sn)) {
         uct_rc_txqp_completion_op(op, ucs_derived_of(op, uct_rc_iface_send_desc_t) + 1);
@@ -368,7 +371,7 @@ uct_rc_txqp_completion_inl_resp(uct_rc_txqp_t *txqp, const void *resp, uint16_t 
 {
     uct_rc_iface_send_op_t *op;
 
-    ucs_trace_poll("txqp %p complete ops up to sn %d", txqp, sn);
+    ucs_info("txqp %p complete ops up to sn %d", txqp, sn);
     ucs_queue_for_each_extract(op, &txqp->outstanding, queue,
                                UCS_CIRCULAR_COMPARE16(op->sn, <=, sn)) {
         ucs_assert(!(op->flags & UCT_RC_IFACE_SEND_OP_FLAG_ZCOPY));

@@ -287,7 +287,8 @@ ucp_tag_offload_do_post(ucp_request_t *req)
         status = ucp_request_memory_reg(context, UCS_BIT(mdi), req->recv.buffer,
                                         req->recv.length, req->recv.datatype,
                                         &req->recv.state, req->recv.mem_type,
-                                        req, UCT_MD_MEM_FLAG_HIDE_ERRORS);
+                                        req, UCT_MD_MEM_FLAG_HIDE_ERRORS,
+                                        UCP_NULL_LANE);
         if ((status != UCS_OK) || !req->recv.state.dt.contig.md_map) {
             /* Can't register this buffer on the offload iface */
             UCP_WORKER_STAT_TAG_OFFLOAD(worker, BLOCK_MEM_REG);

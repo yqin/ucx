@@ -201,15 +201,19 @@ static void ucp_request_dt_dereg(ucp_context_t *context, ucp_dt_reg_t *dt_reg,
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
-                 (context, md_map, buffer, length, datatype, state, mem_type, req_dbg, uct_flags),
+                 (context, md_map, buffer, length, datatype, state, mem_type, req_dbg, uct_flags, lane),
                  ucp_context_t *context, ucp_md_map_t md_map, void *buffer,
                  size_t length, ucp_datatype_t datatype, ucp_dt_state_t *state,
-                 ucs_memory_type_t mem_type, ucp_request_t *req_dbg, unsigned uct_flags)
+                 ucs_memory_type_t mem_type, ucp_request_t *req_dbg, unsigned uct_flags,
+                 ucp_lane_index_t lane)
 {
     size_t iov_it, iovcnt;
     const ucp_dt_iov_t *iov;
+    ucp_dt_struct_t *s;
     ucp_dt_reg_t *dt_reg;
     ucs_status_t status;
+    uct_mem_h *nc_memh;
+    ucp_md_index_t md_idx;
     int flags;
     int level;
 
@@ -256,6 +260,50 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         }
         state->dt.iov.dt_reg = dt_reg;
         break;
+    case UCP_DATATYPE_STRUCT:
+        s       = ucp_dt_struct(datatype);
+        nc_memh = ucp_dt_struct_in_cache(s, buffer);
+        if (ucs_likely(nc_memh != NULL)) {
+            ucs_info("register dt struct %p buf %p, found in cache, memh %p",
+                     s, buffer, nc_memh);
+            /* SET memh properly */
+            state->dt.struct_dt.contig.memh[0] = nc_memh;
+            return UCS_OK;
+        }
+
+        md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
+
+        /* register contig memory block covering the whole struct */
+        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer,
+                                   s->extent * s->rep_count,
+                                   UCT_MD_MEM_ACCESS_ALL, NULL,
+                                   UCS_MEMORY_TYPE_HOST, NULL,
+                                   state->dt.struct_dt.contig.memh,
+                                   &state->dt.struct_dt.contig.md_map);
+        if (status != UCS_OK) {
+            ucs_error("failed to register contig space for struct dt: %s",
+                      ucs_status_string(status));
+            return status;
+        }
+        ucs_info("registered contig memh for %p struct, buf %p, len %ld, ext %ld memh %p repcnt %ld",
+                 s, buffer, s->len, s->extent, state->dt.struct_dt.contig.memh[0],
+                  s->rep_count);
+
+        /*
+        status = ucp_dt_struct_register_ep(req_dbg->send.ep, lane, buffer, datatype,
+                                           state->dt.struct_dt.contig.memh[0], // revise md
+                                           state->dt.struct_dt.non_contig.memh,
+                                           &state->dt.struct_dt.non_contig.md_map);
+                                              */
+        status = ucp_dt_struct_register(context->tl_mds[md_idx].md, buffer, datatype,
+                                        state->dt.struct_dt.contig.memh[0],
+                                        state->dt.struct_dt.non_contig.memh,
+                                        &state->dt.struct_dt.non_contig.md_map);
+        if (status != UCS_OK) {
+            goto err;
+        }
+
+        break;
     default:
         status = UCS_ERR_INVALID_PARAM;
         ucs_error("Invalid data type %lx", datatype);
@@ -290,6 +338,9 @@ UCS_PROFILE_FUNC_VOID(ucp_request_memory_dereg, (context, datatype, state, req_d
             ucs_free(state->dt.iov.dt_reg);
             state->dt.iov.dt_reg = NULL;
         }
+        break;
+    case UCP_DATATYPE_STRUCT:
+        ucp_request_dt_dereg(context, &state->dt.struct_dt.contig, 1, req_dbg);
         break;
     default:
         break;

@@ -172,7 +172,8 @@ ucs_status_t ucp_tag_rndv_reg_send_buffer(ucp_request_t *sreq)
          * case RTS will be sent with empty key, and sender will fallback to
          * PUT or pipeline protocols. */
         status = ucp_request_send_buffer_reg(sreq, md_map,
-                                             UCT_MD_MEM_FLAG_HIDE_ERRORS);
+                                             UCT_MD_MEM_FLAG_HIDE_ERRORS,
+                                             UCP_NULL_LANE);
         if (status != UCS_OK) {
             return status;
         }

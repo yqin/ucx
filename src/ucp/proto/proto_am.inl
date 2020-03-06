@@ -214,6 +214,19 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
                                             src_iov, length_max, md_index,
                                             md_flags);
         break;
+    case UCP_DATATYPE_STRUCT:
+        /* just single indirect memh */
+        ucs_assert(md_flags & UCT_MD_FLAG_NEED_MEMH);
+        memh_index    = ucs_bitmap2idx(state->dt.struct_dt.non_contig.md_map,
+                                       md_index);
+        iov[0].memh   = state->dt.struct_dt.non_contig.memh[memh_index];
+        iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov, state->offset);
+        iov[0].length = length_max;
+        iov[0].stride = 0;
+        iov[0].count  = 1;
+        *iovcnt       = 1;
+        length_it     = iov[0].length;
+        break;
     default:
         ucs_error("Invalid data type");
     }
@@ -240,6 +253,8 @@ ucs_status_t ucp_do_am_zcopy_single(uct_pending_req_t *self, uint8_t am_id,
                         &state, req->send.buffer, req->send.datatype,
                         req->send.length, ucp_ep_md_index(ep, req->send.lane), NULL);
 
+    ucs_info("am_zcopy, dt %ld, length %ld, iovcnt %ld",
+             req->send.datatype & UCP_DATATYPE_CLASS_MASK, req->send.length, iovcnt);
     status = uct_ep_am_zcopy(ep->uct_eps[req->send.lane], am_id, (void*)hdr,
                              hdr_size, iov, iovcnt, 0,
                              &req->send.state.uct_comp);
@@ -446,6 +461,8 @@ ucp_proto_get_zcopy_threshold(const ucp_request_t *req,
         return ucs_min(max_zcopy, zcopy_thresh);
     } else if (UCP_DT_IS_GENERIC(req->send.datatype)) {
         return max_zcopy;
+    } else if (UCP_DT_IS_STRUCT(req->send.datatype)) {
+        return 0;
     }
 
     ucs_error("Unsupported datatype");
