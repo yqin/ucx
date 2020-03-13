@@ -16,7 +16,7 @@
 #include <ucs/debug/memtrack.h>
 #include <ucs/debug/assert.h>
 #include <ucs/sys/math.h>
-#include <src/uct/api/uct.h>
+#include <uct/api/uct.h>
 #include <ucp/core/ucp_ep.inl>
 
 #include <string.h>

@@ -9,7 +9,7 @@
 
 #include <ucp/api/ucp.h>
 #include <ucs/datastruct/khash.h>
-#include <src/uct/api/uct.h>
+#include <uct/api/uct.h>
 #include <ucp/core/ucp_types.h>
 
 typedef struct ucp_dt_struct_hash_value {
