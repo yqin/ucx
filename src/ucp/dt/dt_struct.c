@@ -28,11 +28,13 @@ ucs_status_t _struct_register_ep_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
 ucs_status_t _struct_register_rec(uct_md_h md, void *buf, ucp_dt_struct_t *s,
                                   uct_mem_h contig_memh, uct_mem_h* memh);
 
-static void _set_length(ucp_dt_struct_t *s)
+static void _set_struct_attributes(ucp_dt_struct_t *s)
 {
     size_t i, length = 0, iovs = 0;
+    size_t depth = 0;
     size_t min_disp = SIZE_MAX;
     size_t max_disp = 0;
+    size_t extent;
 
     for (i = 0; i < s->desc_count; i++) {
         ucp_struct_dt_desc_t *dsc = &s->desc[i];
@@ -45,10 +47,8 @@ static void _set_length(ucp_dt_struct_t *s)
             length += ucp_dt_struct_length(ucp_dt_struct(dsc->dt));
             iovs   += ucp_dt_struct(dsc->dt)->rep_count == 1 ?
                       ucp_dt_struct(dsc->dt)->uct_iov_count : 1;
+            depth = ucs_max(depth, ucp_dt_struct_depth(ucp_dt_struct(dsc->dt)));
             break;
-        case UCP_DATATYPE_IOV:
-        case UCP_DATATYPE_GENERIC:
-            /* These types are not supported in the struct datatype */
         default:
             /* Should not happen! */
             ucs_assertv(0, "wrong dt %ld", dsc->dt & UCP_DATATYPE_CLASS_MASK);
@@ -56,39 +56,33 @@ static void _set_length(ucp_dt_struct_t *s)
 
         }
         min_disp = ucs_min(min_disp, dsc->displ);
-        max_disp = ucs_max(max_disp, dsc->displ + dsc->extent);
+        /* NOTE:
+         * It is not correct to calculate extent of a single repetition and
+         * multiply by number of repetitions to get the final extent.
+         * Example:
+         * subdt1: |xxx|...|xxx|...|xxx|
+         * subdt2:    |yy|..|yy|..|yy|
+         * sing  : |-----|
+         * singX3: |-----|-----|-----|
+         * real  : |-------------------|
+         *
+         * Note, that for the stride, extent doesn't include the last padding
+         * coming from the stride:
+         * stride: |xxx|...|xxx|...|xxx|...|
+         * extent: |xxxxxxxxxxxxxxxxxxx|
+         * Thus the formua is: stride * (rep_count - 1) + payload
+         */
+        extent = dsc->extent * (s->rep_count - 1) + ucp_dt_length(dsc->dt);
+        max_disp = ucs_max(max_disp, dsc->displ + extent);
     }
     /* TODO: UMR will be created for repeated patterns, otherwise can unfold.
      * In case of nested umr just one iov would be enough. Need to distinguish
      * "leaf" and "nested" structs */
+
     s->uct_iov_count = iovs;
     s->step_len      = length;
     s->len           = length * s->rep_count;
     s->extent        = max_disp - min_disp;
-}
-
-static void _set_depth(ucp_dt_struct_t *s)
-{
-    size_t i, depth = 0;
-
-    for (i = 0; i < s->desc_count; i++) {
-        ucp_struct_dt_desc_t *dsc = &s->desc[i];
-        switch (dsc->dt & UCP_DATATYPE_CLASS_MASK) {
-        case UCP_DATATYPE_CONTIG:
-            break;
-        case UCP_DATATYPE_STRUCT:
-            depth = ucs_max(depth, ucp_dt_struct_depth(ucp_dt_struct(dsc->dt)));
-            break;
-        case UCP_DATATYPE_IOV:
-        case UCP_DATATYPE_GENERIC:
-            /* These types are not supported in the struct datatype */
-        default:
-            /* Should not happen! */
-            ucs_assert(0);
-            break;
-
-        }
-    }
     s->depth = depth + 1;
 }
 
@@ -233,8 +227,15 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
      */
     for(i = 0; i < desc_count; i++){
         switch (desc_ptr[i].dt & UCP_DATATYPE_CLASS_MASK) {
-        case UCP_DATATYPE_CONTIG:
         case UCP_DATATYPE_STRUCT:
+            /* Additional check for unsupported configurations */
+            if(1 != rep_count) {
+                /* Currently we cannot repeat struct datatype
+                 * as it requires re-registration of the UMR.
+                 * TODO: fix this if needed in future */
+                return UCS_ERR_NOT_IMPLEMENTED;
+            }
+        case UCP_DATATYPE_CONTIG:
             /* OK */
             break;
         case UCP_DATATYPE_IOV:
@@ -260,8 +261,8 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
     memcpy(dt->desc, desc_ptr, sizeof(*desc_ptr) * desc_count);
     dt->desc_count = desc_count;
     dt->rep_count = rep_count;
-    _set_length(dt);
-    _set_depth(dt);
+
+    _set_struct_attributes(dt);
     *datatype_p = ((uintptr_t)dt) | UCP_DATATYPE_STRUCT;
 
     ucs_info("Created struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld, rep count %ld",

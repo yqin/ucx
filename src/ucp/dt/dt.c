@@ -16,6 +16,40 @@
 #include <ucs/profile/profile.h>
 
 
+size_t ucp_dt_length(ucp_datatype_t datatype)
+{
+    switch (datatype & UCP_DATATYPE_CLASS_MASK) {
+    case UCP_DATATYPE_CONTIG:
+        return ucp_contig_dt_length(datatype, 1);
+
+    case UCP_DATATYPE_STRUCT:
+        return ucp_dt_struct_length(ucp_dt_struct(datatype));
+
+    case UCP_DATATYPE_IOV:
+    case UCP_DATATYPE_GENERIC:
+        /* TODO: extend to support generic cases */
+    default:
+        ucs_bug("Invalid data type");
+    }
+
+    return 0;
+}
+
+size_t ucp_dt_extent(ucp_datatype_t datatype)
+{
+    switch (datatype & UCP_DATATYPE_CLASS_MASK) {
+    case UCP_DATATYPE_CONTIG:
+        return ucp_contig_dt_length(datatype, 1);
+    case UCP_DATATYPE_STRUCT:
+        return ucp_dt_struct_extent(ucp_dt_struct(datatype));
+    case UCP_DATATYPE_IOV:
+    case UCP_DATATYPE_GENERIC:
+        /* TODO: define the behavior */
+    default:
+        ucs_bug("Invalid data type");
+    }
+}
+
 UCS_PROFILE_FUNC(ucs_status_t, ucp_mem_type_unpack,
                  (worker, buffer, recv_data, recv_length, mem_type),
                  ucp_worker_h worker, void *buffer, const void *recv_data,
