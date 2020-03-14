@@ -250,7 +250,7 @@ ucp_stream_recv_request_init(ucp_request_t *req, ucp_ep_h ep, void *buffer,
     req->recv.buffer   = buffer;
     req->recv.datatype = datatype;
     req->recv.length   = ucs_likely(!UCP_DT_IS_GENERIC(datatype)) ? length :
-                         ucp_dt_length(datatype, count, NULL, &req->recv.state);
+                         ucp_dt_length_state(datatype, count, NULL, &req->recv.state);
     req->recv.mem_type = ucp_memory_type_detect(ep->worker->context,
                                                 (void*)buffer, req->recv.length);
 }
@@ -279,7 +279,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_stream_recv_nb,
     UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(ep->worker);
 
     if (ucs_likely(!UCP_DT_IS_GENERIC(datatype))) {
-        dt_length = ucp_dt_length(datatype, count, buffer, NULL);
+        dt_length = ucp_dt_length_state(datatype, count, buffer, NULL);
         if (ucs_likely(ucp_stream_recv_nb_is_inplace(ep_ext, dt_length))) {
             status = ucp_stream_process_rdesc_inplace(ucp_stream_rdesc_get(ep_ext),
                                                       datatype, buffer, count,
