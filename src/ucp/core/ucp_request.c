@@ -275,7 +275,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
 
         /* register contig memory block covering the whole struct */
         status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer,
-                                   s->extent * s->rep_count,
+                                   s->extent,
                                    UCT_MD_MEM_ACCESS_ALL, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
                                    state->dt.struct_dt.contig.memh,
