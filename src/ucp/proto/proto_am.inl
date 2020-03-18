@@ -184,6 +184,7 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
     uint64_t md_flags = context->tl_mds[md_index].attr.cap.flags;
     size_t length_it  = 0;
     ucp_md_index_t memh_index;
+    ucp_dt_struct_t *s;
 
     ucs_assert((context->tl_mds[md_index].attr.cap.flags & UCT_MD_FLAG_REG) ||
                !(md_flags & UCT_MD_FLAG_NEED_MEMH));
@@ -216,11 +217,12 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
         break;
     case UCP_DATATYPE_STRUCT:
         /* just single indirect memh */
+        s = ucp_dt_struct(datatype);
         ucs_assert(md_flags & UCT_MD_FLAG_NEED_MEMH);
         memh_index    = ucs_bitmap2idx(state->dt.struct_dt.non_contig.md_map,
                                        md_index);
         iov[0].memh   = state->dt.struct_dt.non_contig.memh[memh_index];
-        iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov, state->offset);
+        iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov, state->offset) + s->lb_displ;
         iov[0].length = length_max;
         iov[0].stride = 0;
         iov[0].count  = 1;
