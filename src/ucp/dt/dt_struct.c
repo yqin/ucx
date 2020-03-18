@@ -35,6 +35,8 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
     size_t min_disp = SIZE_MAX;
     size_t max_disp = 0;
     size_t extent;
+    /* Use the middle of the 64-bit address space as the base address */
+    size_t base_addr = 1L << ((sizeof(size_t) * 8) - 1);
 
     for (i = 0; i < s->desc_count; i++) {
         ucp_struct_dt_desc_t *dsc = &s->desc[i];
@@ -55,7 +57,7 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
             break;
 
         }
-        min_disp = ucs_min(min_disp, dsc->displ);
+        min_disp = ucs_min(min_disp, base_addr + dsc->displ);
         /* NOTE:
          * It is not correct to calculate extent of a single repetition and
          * multiply by number of repetitions to get the final extent.
@@ -73,7 +75,7 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
          * Thus the formua is: stride * (rep_count - 1) + payload
          */
         extent = dsc->extent * (s->rep_count - 1) + ucp_dt_length(dsc->dt);
-        max_disp = ucs_max(max_disp, dsc->displ + extent);
+        max_disp = ucs_max(max_disp, base_addr + dsc->displ + extent);
     }
     /* TODO: UMR will be created for repeated patterns, otherwise can unfold.
      * In case of nested umr just one iov would be enough. Need to distinguish
