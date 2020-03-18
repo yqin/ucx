@@ -46,6 +46,7 @@ typedef struct ucp_dt_struct {
     size_t rep_count;
     size_t uct_iov_count; /* total count of needed UCT iovs for unfolded struct */
     size_t extent; /* total contig space covering the whole type */
+    ptrdiff_t lb_displ; /* the lowest displacement from which extent is effective */
     khash_t(dt_struct) hash;
 } ucp_dt_struct_t;
 

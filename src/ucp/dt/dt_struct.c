@@ -85,6 +85,7 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
     s->step_len      = length;
     s->len           = length * s->rep_count;
     s->extent        = max_disp - min_disp;
+    s->lb_displ      = (ptrdiff_t)min_disp - (ptrdiff_t)base_addr;
     s->depth = depth + 1;
 }
 

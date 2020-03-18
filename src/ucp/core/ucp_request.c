@@ -274,7 +274,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
 
         /* register contig memory block covering the whole struct */
-        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer,
+        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx),
+                                   buffer + s->lb_displ,
                                    s->extent,
                                    UCT_MD_MEM_ACCESS_ALL, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
