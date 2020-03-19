@@ -50,6 +50,22 @@ size_t ucp_dt_extent(ucp_datatype_t datatype)
     }
 }
 
+size_t ucp_dt_low_bound(ucp_datatype_t datatype)
+{
+    switch (datatype & UCP_DATATYPE_CLASS_MASK) {
+    case UCP_DATATYPE_CONTIG:
+        return 0;
+    case UCP_DATATYPE_STRUCT:
+        return ucp_dt_struct_lb(ucp_dt_struct(datatype));
+    case UCP_DATATYPE_IOV:
+    case UCP_DATATYPE_GENERIC:
+        /* TODO: define the behavior */
+    default:
+        ucs_bug("Invalid data type");
+    }
+}
+
+
 UCS_PROFILE_FUNC(ucs_status_t, ucp_mem_type_unpack,
                  (worker, buffer, recv_data, recv_length, mem_type),
                  ucp_worker_h worker, void *buffer, const void *recv_data,

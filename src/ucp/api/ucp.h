@@ -3057,6 +3057,7 @@ void ucp_request_free(void *request);
 
 size_t ucp_dt_length(ucp_datatype_t datatype);
 size_t ucp_dt_extent(ucp_datatype_t datatype);
+size_t ucp_dt_low_bound(ucp_datatype_t datatype);
 
 /**
  * @ingroup UCP_DATATYPE

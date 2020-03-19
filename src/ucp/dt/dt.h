@@ -53,6 +53,7 @@ typedef struct ucp_dt_state {
 
 size_t ucp_dt_length(ucp_datatype_t datatype);
 size_t ucp_dt_extent(ucp_datatype_t datatype);
+size_t ucp_dt_low_bound(ucp_datatype_t datatype);
 
 size_t ucp_dt_pack(ucp_worker_h worker, ucp_datatype_t datatype,
                    ucs_memory_type_t mem_type, void *dest, const void *src,

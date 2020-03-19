@@ -34,7 +34,7 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
     size_t depth = 0;
     size_t min_disp = SIZE_MAX;
     size_t max_disp = 0;
-    size_t extent;
+    size_t extent, lb;
     /* Use the middle of the 64-bit address space as the base address */
     size_t base_addr = 1L << ((sizeof(size_t) * 8) - 1);
 
@@ -57,7 +57,8 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
             break;
 
         }
-        min_disp = ucs_min(min_disp, base_addr + dsc->displ);
+        lb = base_addr + dsc->displ + ucp_dt_low_bound(dsc->dt);
+        min_disp = ucs_min(min_disp, lb);
         /* NOTE:
          * It is not correct to calculate extent of a single repetition and
          * multiply by number of repetitions to get the final extent.
@@ -74,8 +75,8 @@ static void _set_struct_attributes(ucp_dt_struct_t *s)
          * extent: |xxxxxxxxxxxxxxxxxxx|
          * Thus the formua is: stride * (rep_count - 1) + payload
          */
-        extent = dsc->extent * (s->rep_count - 1) + ucp_dt_length(dsc->dt);
-        max_disp = ucs_max(max_disp, base_addr + dsc->displ + extent);
+        extent = dsc->extent * (s->rep_count - 1) + ucp_dt_extent(dsc->dt);
+        max_disp = ucs_max(max_disp, lb + extent);
     }
     /* TODO: UMR will be created for repeated patterns, otherwise can unfold.
      * In case of nested umr just one iov would be enough. Need to distinguish
@@ -454,21 +455,22 @@ static uct_iov_t* _fill_md_uct_iov_rec(uct_md_h md, void *buf, ucp_dt_struct_t *
     uct_iov_t *iov = iovs;
     ucp_dt_struct_t *s_in;
     ucs_status_t status;
-    void *ptr;
+    void *ptr, *eptr;
     int i;
 
     for (i = 0; i < s->desc_count; i++, iov++) {
         ptr = UCS_PTR_BYTE_OFFSET(buf, s->desc[i].displ);
-
+        eptr = UCS_PTR_BYTE_OFFSET(ptr, ucp_dt_low_bound(s->desc[i].dt));
         if (UCP_DT_IS_STRUCT(s->desc[i].dt)) {
             s_in = ucp_dt_struct(s->desc[i].dt);
             if (s_in->rep_count == 1) {
                 iov = _fill_md_uct_iov_rec(md, ptr, s_in, contig_memh, iov);
             } else {
-                iov->buffer = ptr;
+                /* calculate effective offset */
+                iov->buffer = eptr;
                 iov->length = s_in->len;
                 iov->stride = s->desc[i].extent;
-                status = _struct_register_rec(md, buf, s_in, contig_memh, &iov->memh);
+                status = _struct_register_rec(md, ptr, s_in, contig_memh, &iov->memh);
                 ucs_assert_always(status == UCS_OK);
             }
         } else {

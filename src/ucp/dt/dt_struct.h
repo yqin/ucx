@@ -75,6 +75,14 @@ static inline size_t ucp_dt_struct_extent(const ucp_dt_struct_t *s)
 }
 
 /**
+ * Get the total length of the structured datatype
+ */
+static inline size_t ucp_dt_struct_lb(const ucp_dt_struct_t *s)
+{
+    return s->lb_displ;
+}
+
+/**
  * Get the max depth of the struct
  */
 static inline size_t ucp_dt_struct_depth(const ucp_dt_struct_t *s)
