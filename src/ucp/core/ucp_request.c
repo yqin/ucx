@@ -267,7 +267,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
             ucs_info("register dt struct %p buf %p, found in cache, memh %p",
                      s, buffer, nc_memh);
             /* SET memh properly */
-            state->dt.struct_dt.contig.memh[0] = nc_memh;
+            state->dt.struct_dt.non_contig.memh[0] = nc_memh;
             return UCS_OK;
         }
 
