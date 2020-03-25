@@ -79,6 +79,17 @@ ucp_dt_unpack_only(ucp_worker_h worker, void *buffer, size_t count,
                          &iov_offset, &iovcnt_offset);
         return UCS_OK;
 
+    case UCP_DATATYPE_STRUCT:
+        ucs_assert(count == 1);
+        if (truncation &&
+            ucs_unlikely(length > (buffer_size = ucp_dt_length(datatype)))) {
+            goto err_truncated;
+        }
+        iov_offset = 0;
+        UCS_PROFILE_CALL(ucp_dt_struct_scatter, buffer, /*count,*/ datatype,
+                                               data, length, 0);
+        return UCS_OK;
+
     case UCP_DATATYPE_GENERIC:
         dt_gen = ucp_dt_generic(datatype);
         state  = UCS_PROFILE_NAMED_CALL("dt_start", dt_gen->ops.start_unpack,
