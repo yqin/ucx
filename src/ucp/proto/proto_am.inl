@@ -221,8 +221,10 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
         ucs_assert(md_flags & UCT_MD_FLAG_NEED_MEMH);
         memh_index    = ucs_bitmap2idx(state->dt.struct_dt.non_contig.md_map,
                                        md_index);
+
         iov[0].memh   = state->dt.struct_dt.non_contig.memh[memh_index];
-        iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov, state->offset) + s->lb_displ;
+        iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov,
+                                            state->offset + s->lb_displ);
         iov[0].length = length_max;
         iov[0].stride = 0;
         iov[0].count  = 1;
@@ -299,11 +301,10 @@ ucs_status_t ucp_do_am_zcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
     unsigned flag_iov_mid   = 0;
     size_t iovcnt           = 0;
     ucp_dt_state_t state;
-    size_t max_middle;
+    size_t msg_max_mid, msg_max_first, msg_max, msg_len;
     size_t max_iov;
     uct_iov_t *iov;
     size_t offset;
-    size_t mid_len;
     ucs_status_t status;
     uct_ep_h uct_ep;
     int pending_adde_res;
@@ -316,7 +317,8 @@ ucs_status_t ucp_do_am_zcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
     }
 
     uct_ep     = ep->uct_eps[req->send.lane];
-    max_middle = ucp_ep_get_max_zcopy(ep, req->send.lane) - hdr_size_middle;
+    msg_max_mid = ucp_ep_get_max_zcopy(ep, req->send.lane) - hdr_size_middle;
+    msg_max_first = ucp_ep_get_max_zcopy(ep, req->send.lane) - hdr_size_first;
     max_iov    = ucp_ep_get_max_iov(ep, req->send.lane);
     iov        = ucs_alloca(max_iov * sizeof(uct_iov_t));
 
@@ -324,22 +326,32 @@ ucs_status_t ucp_do_am_zcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
         state      = req->send.state.dt;
         offset     = state.offset;
 
+        if (offset == 0) {
+            msg_max = msg_max_first;
+        } else {
+            msg_max = msg_max_mid;
+        }
+
         ucs_assert(max_iov > 0);
         if (UCP_DT_IS_IOV(req->send.datatype)) {
             /* This flag should guarantee middle stage usage if iovcnt exceeded */
             flag_iov_mid = ((state.dt.iov.iovcnt_offset + max_iov) <
                             state.dt.iov.iovcnt);
+        } else if(UCP_DT_IS_STRUCT(req->send.datatype)) {
+            flag_iov_mid = (offset + msg_max) < req->send.length;
         } else {
             ucs_assert(UCP_DT_IS_CONTIG(req->send.datatype));
         }
 
+        msg_len = ucs_min(msg_max, req->send.length - offset);
+        ucs_assert(offset + msg_len <= req->send.length);
         if (offset == 0) {
             /* First stage */
             ucs_assert(req->send.lane == ucp_ep_get_am_lane(ep));
             ucp_dt_iov_copy_uct(ep->worker->context, iov, &iovcnt, max_iov, &state,
                                 req->send.buffer,  req->send.datatype,
-                                max_middle - hdr_size_first + hdr_size_middle,
-                                ucp_ep_md_index(ep, req->send.lane), NULL);
+                                msg_len, ucp_ep_md_index(ep, req->send.lane),
+                                NULL);
             ucs_assertv(state.offset != 0, "state must be changed on 1st stage");
             ucs_assertv(state.offset < req->send.length, "state.offset=%zu",
                         state.offset);
@@ -352,10 +364,8 @@ ucs_status_t ucp_do_am_zcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
                                                    iov[0].length, status);
         } else {
             /* Middle or last stage */
-            mid_len = ucs_min(max_middle, req->send.length - offset);
-            ucs_assert(offset + mid_len <= req->send.length);
             ucp_dt_iov_copy_uct(ep->worker->context, iov, &iovcnt, max_iov, &state,
-                                req->send.buffer, req->send.datatype, mid_len,
+                                req->send.buffer, req->send.datatype, msg_len,
                                 ucp_ep_md_index(ep, req->send.lane), NULL);
 
             if (offset < state.offset) {
@@ -378,7 +388,7 @@ ucs_status_t ucp_do_am_zcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
             UCS_PROFILE_REQUEST_EVENT_CHECK_STATUS(req, "am_zcopy_middle",
                                                    iov[0].length, status);
 
-            if (!flag_iov_mid && (offset + mid_len == req->send.length)) {
+            if (!flag_iov_mid && (offset + msg_len == req->send.length)) {
                 /* Last stage */
                 if (status == UCS_OK) {
                     ucp_am_zcopy_complete_last_stage(req, &state, complete);
