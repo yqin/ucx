@@ -896,6 +896,20 @@ static ucs_status_t uct_ib_mem_rcache_reg(uct_md_h uct_md, void *address,
     ucs_status_t status;
     uct_ib_mem_t *memh;
 
+char *ptr = getenv("PMIX_RANK");
+if(!strcmp(ptr, "0")){
+    static int count = 0;
+    
+    printf("ALLOC: addr=%p, size=%zu, count=%d\n", address, length, count++);
+    fflush(stdout);
+#if 1
+    static int delay = 1;
+    while( ((count - 1) == 16) && delay ) {
+	sleep(1);
+    }
+#endif
+}
+
     status = ucs_rcache_get(md->rcache, address, length, PROT_READ|PROT_WRITE,
                             &flags, &rregion);
     if (status != UCS_OK) {
