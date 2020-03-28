@@ -496,7 +496,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     umr->memh.umr         = umr;
     umr->memh.super.flags = UCT_IB_MEM_FLAG_NC_MR;
     umr->memh.umr_depth   = umr->depth;
-    umr->memh.mr->addr = umr->base_addr;
+    //umr->memh.mr->addr = umr->base_addr;
 
     if (wr->ext_op.umr.memory_objects != NULL) {
         ucs_assert_always(!umr->is_inline);
