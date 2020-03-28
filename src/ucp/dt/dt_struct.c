@@ -516,6 +516,8 @@ ucs_status_t ucp_dt_struct_register(uct_md_h md, void *buf, ucp_datatype_t dt,
 
     ucs_assert_always(UCP_DT_IS_STRUCT(dt));
 
+    printf("STRUCT reg: addr=%p, datatype=%p\n", buf, s);
+
     ucs_info("Register struct on md, dt %ld, len %ld", dt, s->len);
 
     status = _struct_register_rec(md, buf, s, contig_memh, memh);
