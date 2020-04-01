@@ -8,12 +8,13 @@
 #define UCP_DT_INL_
 
 #include <ucs/profile/profile.h>
+#include <ucp/dt/dt.h>
 
 /**
  * Get the total length of the data
  */
 static UCS_F_ALWAYS_INLINE
-size_t ucp_dt_length(ucp_datatype_t datatype, size_t count,
+size_t ucp_dt_length_state(ucp_datatype_t datatype, size_t count,
                      const ucp_dt_iov_t *iov, const ucp_dt_state_t *state)
 {
     ucp_dt_generic_t *dt_gen;
@@ -33,7 +34,9 @@ size_t ucp_dt_length(ucp_datatype_t datatype, size_t count,
         return dt_gen->ops.packed_size(state->dt.generic.state);
 
     case UCP_DATATYPE_STRUCT:
-        return ucp_dt_struct(datatype)->len;
+        /* Currently only support a single element */
+        ucs_assert(count == 1);
+        return ucp_dt_struct_length(ucp_dt_struct(datatype));
 
     default:
         ucs_error("Invalid data type");
@@ -74,6 +77,17 @@ ucp_dt_unpack_only(ucp_worker_h worker, void *buffer, size_t count,
         iov_offset = iovcnt_offset = 0;
         UCS_PROFILE_CALL(ucp_dt_iov_scatter, buffer, count, data, length,
                          &iov_offset, &iovcnt_offset);
+        return UCS_OK;
+
+    case UCP_DATATYPE_STRUCT:
+        ucs_assert(count == 1);
+        if (truncation &&
+            ucs_unlikely(length > (buffer_size = ucp_dt_length(datatype)))) {
+            goto err_truncated;
+        }
+        iov_offset = 0;
+        UCS_PROFILE_CALL(ucp_dt_struct_scatter, buffer, /*count,*/ datatype,
+                                               data, length, 0);
         return UCS_OK;
 
     case UCP_DATATYPE_GENERIC:

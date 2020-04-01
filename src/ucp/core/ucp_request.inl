@@ -397,6 +397,9 @@ ucp_send_request_add_reg_lane(ucp_request_t *req, ucp_lane_index_t lane)
         /* Can use the first DT registration element, since
          * they have the same MD maps */
         md_map = req->send.state.dt.dt.iov.dt_reg[0].md_map;
+    } else if (UCP_DT_IS_STRUCT(req->send.datatype) &&
+               (req->send.state.dt.dt.struct_dt.non_contig.memh[0] != NULL)) {
+        md_map = req->send.state.dt.dt.struct_dt.non_contig.md_map;
     } else {
         md_map = 0;
     }

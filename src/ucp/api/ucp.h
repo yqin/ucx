@@ -3052,6 +3052,17 @@ void ucp_request_free(void *request);
  * @ingroup UCP_DATATYPE
  * @brief Create a generic datatype.
  *
+ * Obtain meta-information about the datatype
+ */
+
+size_t ucp_dt_length(ucp_datatype_t datatype);
+size_t ucp_dt_extent(ucp_datatype_t datatype);
+size_t ucp_dt_low_bound(ucp_datatype_t datatype);
+
+/**
+ * @ingroup UCP_DATATYPE
+ * @brief Create a generic datatype.
+ *
  * This routine create a generic datatype object.
  * The generic datatype is described by the @a ops @ref ucp_generic_dt_ops_t
  * "object" which provides a table of routines defining the operations for

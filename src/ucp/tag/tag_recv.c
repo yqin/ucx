@@ -97,7 +97,7 @@ ucp_tag_recv_common(ucp_worker_h worker, void *buffer, size_t count,
     }
 
     req->flags              = common_flags | req_flags;
-    req->recv.length        = ucp_dt_length(datatype, count, buffer,
+    req->recv.length        = ucp_dt_length_state(datatype, count, buffer,
                                             &req->recv.state);
     req->recv.mem_type      = ucp_memory_type_detect(worker->context, buffer,
                                                      req->recv.length);

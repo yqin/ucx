@@ -267,15 +267,16 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
             ucs_info("register dt struct %p buf %p, found in cache, memh %p",
                      s, buffer, nc_memh);
             /* SET memh properly */
-            state->dt.struct_dt.contig.memh[0] = nc_memh;
+            state->dt.struct_dt.non_contig.memh[0] = nc_memh;
             return UCS_OK;
         }
 
         md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
 
         /* register contig memory block covering the whole struct */
-        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx), buffer,
-                                   s->extent * s->rep_count,
+        status = ucp_mem_rereg_mds(context, UCS_BIT(md_idx),
+                                   buffer + s->lb_displ,
+                                   s->extent,
                                    UCT_MD_MEM_ACCESS_ALL, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
                                    state->dt.struct_dt.contig.memh,

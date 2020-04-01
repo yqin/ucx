@@ -419,6 +419,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     mrin.attr.exp_access_flags  = UCT_IB_MEM_ACCESS_FLAGS;
     mrin.attr.max_klm_list_size = umr->iov_count;
     umr->memh.mr = ibv_exp_create_mr(&mrin);
+    printf("UMR reg: mr=%p, lkey=%d\n", umr->memh.mr, (int)umr->memh.mr->lkey);
     if (!umr) {
         ucs_error("ibv_exp_create_mr() failed: %m");
         return UCS_ERR_NO_MEMORY;
@@ -496,7 +497,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     umr->memh.umr         = umr;
     umr->memh.super.flags = UCT_IB_MEM_FLAG_NC_MR;
     umr->memh.umr_depth   = umr->depth;
-
+    //umr->memh.mr->addr = umr->base_addr;
 
     if (wr->ext_op.umr.memory_objects != NULL) {
         ucs_assert_always(!umr->is_inline);

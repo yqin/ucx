@@ -366,7 +366,7 @@ static void ucp_am_send_req_init(ucp_request_t *req, ucp_ep_h ep,
     req->send.lane      = ep->am_lane;
 
     ucp_request_send_state_init(req, datatype, count);
-    req->send.length = ucp_dt_length(req->send.datatype, count,
+    req->send.length = ucp_dt_length_state(req->send.datatype, count,
                                      req->send.buffer,
                                      &req->send.state.dt);
 }

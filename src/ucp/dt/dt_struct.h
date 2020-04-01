@@ -9,7 +9,7 @@
 
 #include <ucp/api/ucp.h>
 #include <ucs/datastruct/khash.h>
-#include <src/uct/api/uct.h>
+#include <uct/api/uct.h>
 #include <ucp/core/ucp_types.h>
 
 typedef struct ucp_dt_struct_hash_value {
@@ -46,6 +46,7 @@ typedef struct ucp_dt_struct {
     size_t rep_count;
     size_t uct_iov_count; /* total count of needed UCT iovs for unfolded struct */
     size_t extent; /* total contig space covering the whole type */
+    ptrdiff_t lb_displ; /* the lowest displacement from which extent is effective */
     khash_t(dt_struct) hash;
 } ucp_dt_struct_t;
 
@@ -66,6 +67,22 @@ static inline size_t ucp_dt_struct_length(const ucp_dt_struct_t *s)
 }
 
 /**
+ * Get the total length of the structured datatype
+ */
+static inline size_t ucp_dt_struct_extent(const ucp_dt_struct_t *s)
+{
+    return s->extent;
+}
+
+/**
+ * Get the total length of the structured datatype
+ */
+static inline size_t ucp_dt_struct_lb(const ucp_dt_struct_t *s)
+{
+    return s->lb_displ;
+}
+
+/**
  * Get the max depth of the struct
  */
 static inline size_t ucp_dt_struct_depth(const ucp_dt_struct_t *s)
@@ -79,6 +96,7 @@ static UCS_F_ALWAYS_INLINE uct_mem_h ucp_dt_struct_in_cache(ucp_dt_struct_t *s,
     khiter_t k;
     k = kh_get(dt_struct, &s->hash, (uint64_t)ptr);
 
+    printf("STRUCT rcache req: addr=%p, datatype=%p\n", ptr, s);
     return (k == kh_end(&s->hash)) ? NULL : kh_value(&s->hash, k).memh;
 }
 
