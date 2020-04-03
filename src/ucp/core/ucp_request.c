@@ -268,6 +268,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                      s, buffer, nc_memh);
             /* SET memh properly */
             state->dt.struct_dt.non_contig.memh[0] = nc_memh;
+            UCS_STATS_UPDATE_COUNTER(s->stats, UCP_DT_STRUCT_STAT_IN_CACHE, 1);
             return UCS_OK;
         }
 
@@ -304,6 +305,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         if (status != UCS_OK) {
             goto err;
         }
+        UCS_STATS_UPDATE_COUNTER(s->stats, UCP_DT_STRUCT_STAT_CREATE, 1);
 
         break;
     default:
