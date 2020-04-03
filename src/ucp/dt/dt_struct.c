@@ -143,75 +143,85 @@ static size_t _dte_pack( const ucp_dt_struct_t *s,
                          const void *inbuf, void *outbuf,
                          size_t out_offset_orig, size_t len)
 {
-    ssize_t eidx = -1;
-    size_t elem_len = 0, copy_len = 0;
-    size_t out_offset = out_offset_orig;
-    size_t out_offset_rel = 0, rep_num = 0;
-    ptrdiff_t in_offset = 0;
+    size_t out_offs = 0;
+    size_t copy_len = 0;
+
+    ssize_t elem_idx = -1;
+    size_t elem_len = 0;
+    size_t elem_offs_int = 0, elem_rep_num = 0;
+    ptrdiff_t elem_offs = 0;
     ucp_dt_struct_t *sub_s;
 
     /* Seek for the offset */
-    eidx = _elem_by_offset(s, out_offset, &out_offset_rel, &rep_num);
+    elem_idx = _elem_by_offset(s, out_offs, &elem_offs_int, &elem_rep_num);
 
-    while( (0 < len) && rep_num < s->rep_count){
-        ucp_struct_dt_desc_t *dsc = &s->desc[eidx];
-        in_offset = dsc->displ + dsc->extent * rep_num;
+    while( (0 < len) && elem_rep_num < s->rep_count){
+        ucp_struct_dt_desc_t *dsc = &s->desc[elem_idx];
+        elem_offs = dsc->displ + dsc->extent * elem_rep_num;
         switch (dsc->dt & UCP_DATATYPE_CLASS_MASK) {
         case UCP_DATATYPE_CONTIG:
             elem_len = ucp_contig_dt_length(dsc->dt, 1);
-            copy_len = ucs_min(elem_len - out_offset_rel, len);
-            memcpy(outbuf + out_offset, inbuf + in_offset, copy_len);
+            copy_len = ucs_min(elem_len - elem_offs_int, len);
+            memcpy(outbuf + out_offs,
+                   (inbuf + elem_offs + elem_offs_int),
+                   copy_len);
             break;
         case UCP_DATATYPE_STRUCT:
             sub_s = ucp_dt_struct(dsc->dt);
-            copy_len = _dte_pack(sub_s, inbuf + in_offset, outbuf + out_offset,
-                                 out_offset_rel, len);
+            copy_len = _dte_pack(sub_s, inbuf + elem_offs, outbuf + out_offs,
+                                 elem_offs_int, len);
             break;
         }
         /* after the first iteration we will always be copying from the
          * beginning of each structural element
          */
-        out_offset += copy_len;
+        out_offs += copy_len;
         len -= copy_len;
-        out_offset_rel = 0;
-        eidx++;
-        if(!(eidx < s->desc_count)) {
-            eidx = 0;
-            rep_num++;
+        elem_offs_int = 0;
+        elem_idx++;
+        if(!(elem_idx < s->desc_count)) {
+            elem_idx = 0;
+            elem_rep_num++;
         }
     }
 
     /* Return processed length */
-    return out_offset - out_offset_orig;
+    return out_offs;
 }
 
 static size_t _dte_unpack(const ucp_dt_struct_t *s,
                           const void *inbuf, void *outbuf,
                          size_t in_offset_orig, size_t len)
 {
-    ssize_t eidx = -1;
-    size_t elem_len = 0, copy_len = 0;
-    size_t in_offset = in_offset_orig;
-    size_t in_offset_rel = 0, rep_num = 0;
-    ptrdiff_t out_offset = 0;
+    size_t in_offset = 0;
+    size_t copy_len = 0;
+
+    ssize_t elem_idx = -1;
+    size_t elem_len = 0;
+    size_t elem_offs_int = 0, elem_rep_num = 0;
+    ptrdiff_t elem_offs = 0;
     ucp_dt_struct_t *sub_s;
 
     /* Seek for the offset */
-    eidx = _elem_by_offset(s, in_offset, &in_offset_rel, &rep_num);
+    elem_idx = _elem_by_offset(s, in_offset_orig,
+                               &elem_offs_int, &elem_rep_num);
 
-    while( (0 < len) && rep_num < s->rep_count){
-        ucp_struct_dt_desc_t *dsc = &s->desc[eidx];
-        out_offset = dsc->displ + dsc->extent * rep_num;
+    while( (0 < len) && elem_rep_num < s->rep_count){
+        ucp_struct_dt_desc_t *dsc = &s->desc[elem_idx];
+        elem_offs = dsc->displ + dsc->extent * elem_rep_num;
         switch (dsc->dt & UCP_DATATYPE_CLASS_MASK) {
         case UCP_DATATYPE_CONTIG:
             elem_len = ucp_contig_dt_length(dsc->dt, 1);
-            copy_len = ucs_min(elem_len - in_offset_rel, len);
-            memcpy(outbuf + out_offset, inbuf + in_offset, copy_len);
+            copy_len = ucs_min(elem_len - elem_offs_int, len);
+            memcpy((outbuf + elem_offs + elem_offs_int),
+                   (inbuf + in_offset),
+                   copy_len);
             break;
         case UCP_DATATYPE_STRUCT:
             sub_s = ucp_dt_struct(dsc->dt);
-            copy_len = _dte_unpack(sub_s, inbuf + in_offset, outbuf + out_offset,
-                      in_offset_rel, len);
+            copy_len = _dte_unpack(sub_s, inbuf + in_offset,
+                                   outbuf + elem_offs, elem_offs_int,
+                                   len);
             break;
         }
         /* after the first iteration we will always be copying from the
@@ -219,16 +229,16 @@ static size_t _dte_unpack(const ucp_dt_struct_t *s,
          */
         in_offset += copy_len;
         len -= copy_len;
-        in_offset_rel = 0;
-        eidx++;
-        if(!(eidx < s->desc_count)) {
-            eidx = 0;
-            rep_num++;
+        elem_offs_int = 0;
+        elem_idx++;
+        if(!(elem_idx < s->desc_count)) {
+            elem_idx = 0;
+            elem_rep_num++;
         }
     }
 
     /* Return processed length */
-    return (in_offset - in_offset_orig);
+    return in_offset;
 }
 
 ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
