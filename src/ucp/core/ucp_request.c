@@ -297,8 +297,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                                            state->dt.struct_dt.non_contig.memh,
                                            &state->dt.struct_dt.non_contig.md_map);
                                               */
-        status = ucp_dt_struct_register(context->tl_mds[md_idx].md, buffer, datatype,
-                                        state->dt.struct_dt.contig.memh[0],
+        status = ucp_dt_struct_register(context, md_idx, buffer, datatype,
                                         state->dt.struct_dt.non_contig.memh,
                                         &state->dt.struct_dt.non_contig.md_map);
         if (status != UCS_OK) {
