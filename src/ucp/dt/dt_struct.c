@@ -566,7 +566,9 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context, ucp_md_index_t md_id
                                val.contig.memh,
                                &val.contig.md_map);
 
+#if 0
     printf("STRUCT reg: addr=%p, datatype=%p\n", buf, s);
+#endif
 
     ucs_info("Register struct on md, dt %ld, len %ld", dt, s->len);
 

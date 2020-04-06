@@ -108,7 +108,9 @@ static UCS_F_ALWAYS_INLINE uct_mem_h ucp_dt_struct_in_cache(ucp_dt_struct_t *s,
     khiter_t k;
     k = kh_get(dt_struct, &s->hash, (uint64_t)ptr);
 
+#if 0
     printf("STRUCT rcache req: addr=%p, datatype=%p\n", ptr, s);
+#endif
     return (k == kh_end(&s->hash)) ?
                 NULL : kh_value(&s->hash, k).noncontig.memh[0];
 }
