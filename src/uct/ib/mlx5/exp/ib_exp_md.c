@@ -9,6 +9,8 @@
 #include <ucs/arch/bitops.h>
 #include <ucs/profile/profile.h>
 
+#include <config.h>
+
 typedef struct uct_ib_umr uct_ib_umr_t;
 
 typedef struct {
@@ -45,6 +47,9 @@ struct uct_ib_umr {
     uct_completion_t       comp;   /* completion routine */
     //ep_post_dereg_f        dereg_f; /* endpoint WR posting function pointer */
     uct_ep_t               *tl_ep;  /* registering endpoint - for cleanup */
+
+    /* debug */
+    int under_dbg, dt_num, dt_count;
 };
 
 static ucs_status_t uct_ib_mlx5_reg_key(uct_ib_md_t *md, void *address,
@@ -401,6 +406,53 @@ uct_ib_mlx5_exp_umr_alloc(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     return status;
 }
 
+static void _dump_umr_mgmt(uct_ib_umr_t *umr, char *descr)
+{
+    int rank = -1, under_debug = 0;
+    char *ptr = NULL;
+
+    if (rank < 0 && (ptr = getenv("PMIX_RANK"))) {
+        rank = atoi(ptr);
+    }
+
+    if ((ptr = getenv("DEBUG_TRACED_RANK"))) {
+        char *token;
+
+        /* get the first token */
+        token = strtok(ptr, ",");
+        /* walk through other tokens */
+        while( token != NULL ) {
+            if(rank == atoi(token)){
+                under_debug = 1;
+                break;
+            }
+            token = strtok(NULL, ",");
+        }
+    }
+
+    if (!under_debug) {
+        return;
+    }
+
+    if( umr->under_dbg == 0 ) {
+        /* initialize the debugging fields */
+        umr->under_dbg = 1;
+
+        umr->dt_count = -1;
+        umr->dt_num = -1;
+        if ((ptr = getenv("DEBUG_CUR_DT_NUM"))) {
+            umr->dt_num = atoi(ptr);
+        }
+        if ((ptr = getenv("DEBUG_CUR_DT_COUNT"))) {
+            umr->dt_count = atoi(ptr);
+        }
+    }
+
+    printf("%d: %s va=%p lkey=0x%x dtnum=%d, dtcount=%d",
+           rank, descr, umr->memh.mr->addr, umr->memh.mr->lkey,
+           umr->dt_num, umr->dt_count);
+}
+
 ucs_status_t
 uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
                              struct ibv_qp *qp, struct ibv_cq *cq, int sync)
@@ -416,6 +468,8 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
 
     ucs_assert_always(sync); /* TODO: support nonblocking*/
 
+    umr->under_dbg = 0;
+
     /* Create indirect MR */
     mrin.pd                     = md->super.pd;
     mrin.attr.create_flags      = IBV_EXP_MR_INDIRECT_KLMS;
@@ -429,6 +483,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
 #if 0
     printf("UMR reg: mr=%p, lkey=%d\n", umr->memh.mr, (int)umr->memh.mr->lkey);
 #endif
+    _dump_umr_mgmt(umr, "Reg");
 
     /*
     length = 0;
@@ -530,6 +585,8 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     struct ibv_wc wc           = {};
     struct ibv_exp_send_wr *bad_wr;
     int ret;
+
+    _dump_umr_mgmt(umr, "Dereg");
 
     memset(wr, 0, sizeof(*wr));
     wr->exp_opcode             = IBV_EXP_WR_UMR_INVALIDATE;
