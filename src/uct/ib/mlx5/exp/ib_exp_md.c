@@ -449,8 +449,8 @@ static void _dump_umr_mgmt(uct_ib_umr_t *umr, char *descr)
     }
 
     printf("%d: %s va=%p lkey=0x%x dtnum=%d, dtcount=%d",
-           rank, descr, umr->memh.mr->addr, umr->memh.mr->lkey,
-           umr->dt_num, umr->dt_count);
+           rank, descr, (void*)umr->base_addr,
+           umr->memh.mr->lkey, umr->dt_num, umr->dt_count);
 }
 
 ucs_status_t
@@ -483,7 +483,6 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
 #if 0
     printf("UMR reg: mr=%p, lkey=%d\n", umr->memh.mr, (int)umr->memh.mr->lkey);
 #endif
-    _dump_umr_mgmt(umr, "Reg");
 
     /*
     length = 0;
@@ -558,7 +557,10 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     umr->memh.umr         = umr;
     umr->memh.super.flags = UCT_IB_MEM_FLAG_NC_MR;
     umr->memh.umr_depth   = umr->depth;
-    //umr->memh.mr->addr = umr->base_addr;
+//    umr->memh.mr->addr = umr->base_addr;
+
+    _dump_umr_mgmt(umr, "Reg");
+
 
     if (wr->ext_op.umr.memory_objects != NULL) {
         ucs_assert_always(!umr->is_inline);
