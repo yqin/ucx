@@ -448,9 +448,10 @@ static void _dump_umr_mgmt(uct_ib_umr_t *umr, char *descr)
         }
     }
 
-    printf("%d: %s va=%p lkey=0x%x dtnum=%d, dtcount=%d",
+    printf("%d: %s va=%p lkey=0x%x dtnum=%d, dtcount=%d\n",
            rank, descr, (void*)umr->base_addr,
            umr->memh.mr->lkey, umr->dt_num, umr->dt_count);
+    fflush(stdout);
 }
 
 ucs_status_t
