@@ -348,6 +348,7 @@ void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
 
      /* We assume that the sane length was provided */
      ucs_assert(processed_len == length);
+     (void)processed_len;
 }
 
 size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt,

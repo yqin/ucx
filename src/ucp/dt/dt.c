@@ -48,6 +48,7 @@ size_t ucp_dt_extent(ucp_datatype_t datatype)
     default:
         ucs_bug("Invalid data type");
     }
+    abort();
 }
 
 size_t ucp_dt_low_bound(ucp_datatype_t datatype)
@@ -63,6 +64,7 @@ size_t ucp_dt_low_bound(ucp_datatype_t datatype)
     default:
         ucs_bug("Invalid data type");
     }
+    abort();
 }
 
 
