@@ -477,7 +477,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     mrin.attr.exp_access_flags  = UCT_IB_MEM_ACCESS_FLAGS;
     mrin.attr.max_klm_list_size = umr->iov_count;
     umr->memh.mr = ibv_exp_create_mr(&mrin);
-    if (!umr) {
+    if (!umr->memh.mr) {
         ucs_error("ibv_exp_create_mr() failed: %m");
         return UCS_ERR_NO_MEMORY;
     }
@@ -617,7 +617,7 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
             ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
         }
     }
-
+    ibv_dereg_mr(umr->memh.mr);
     ucs_free(umr);
 
     return UCS_OK;
