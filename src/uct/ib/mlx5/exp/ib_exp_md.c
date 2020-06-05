@@ -578,6 +578,20 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     return UCS_OK;
 }
 
+
+sprintf(buf, "%lf", nc_dereg);
+setenv("MY_UCX_DEBUG_NCDEREG", buf, 1);
+sprintf(buf, "%lf", mem_dereg);
+setenv("MY_UCX_DEBUG_MEMDEREG", buf, 1);
+
+#define GET_TS() ({                         \
+    struct timespec ts;                     \
+    double ret = 0;                         \
+    clock_gettime(CLOCK_MONOTONIC, &ts);    \
+    ret = ts.tv_sec + 1E-9*ts.tv_nsec;      \
+    ret;                                    \
+    })
+
 ucs_status_t
 uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
                                struct ibv_cq *cq)
@@ -588,6 +602,7 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     struct ibv_wc wc           = {};
     struct ibv_exp_send_wr *bad_wr;
     int ret;
+    char buf[256];
 
     _dump_umr_mgmt(umr, "Dereg");
 
@@ -597,12 +612,16 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
                                  IBV_EXP_SEND_SIGNALED;
     wr->ext_op.umr.modified_mr = umr->memh.mr;
 
+    start = GET_TS();
     /* Post UMR */
     ret = ibv_exp_post_send(qp, wr, &bad_wr);
     if (ret) {
         ucs_fatal("ibv_exp_post_send(UMR_INV) failed: %m");
     }
+    sprintf(buf, "%lf", GET_TS() - start);
+    setenv("MY_UCX_DEBUG_NC_POST", buf, 1);
 
+    start = GET_TS();
     /* Wait for send UMR completion */
     for (;;) {
         ret = ibv_poll_cq(cq, 1, &wc);
@@ -617,7 +636,14 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
             ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
         }
     }
+    sprintf(buf, "%lf", GET_TS() - start);
+    setenv("MY_UCX_DEBUG_NC_WAIT", buf, 1);
+
+    start = GET_TS();
     ibv_dereg_mr(umr->memh.mr);
+    sprintf(buf, "%lf", GET_TS() - start);
+    setenv("MY_UCX_DEBUG_NC_MR", buf, 1);
+
     ucs_free(umr);
 
     return UCS_OK;
