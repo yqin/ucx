@@ -578,12 +578,6 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     return UCS_OK;
 }
 
-
-sprintf(buf, "%lf", nc_dereg);
-setenv("MY_UCX_DEBUG_NCDEREG", buf, 1);
-sprintf(buf, "%lf", mem_dereg);
-setenv("MY_UCX_DEBUG_MEMDEREG", buf, 1);
-
 #define GET_TS() ({                         \
     struct timespec ts;                     \
     double ret = 0;                         \
@@ -612,7 +606,7 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
                                  IBV_EXP_SEND_SIGNALED;
     wr->ext_op.umr.modified_mr = umr->memh.mr;
 
-    start = GET_TS();
+    double start = GET_TS();
     /* Post UMR */
     ret = ibv_exp_post_send(qp, wr, &bad_wr);
     if (ret) {
