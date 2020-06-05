@@ -310,6 +310,15 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
     return UCS_OK;
 }
 
+#define GET_TS() ({                         \
+    struct timespec ts;                     \
+    double ret = 0;                         \
+    clock_gettime(CLOCK_MONOTONIC, &ts);    \
+    ret = ts.tv_sec + 1E-9*ts.tv_nsec;      \
+    ret;                                    \
+    })
+
+
 void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
 {
     ucp_dt_struct_t *dt = ucp_dt_struct(datatype_p);
@@ -319,20 +328,35 @@ void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
     ucs_info("Destroy struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld",
              dt, dt->len, dt->step_len, dt->depth, dt->uct_iov_count);
 
+    double start, nc_dereg = 0, mem_dereg = 0;
+    int count = 0;
     kh_foreach_value(&dt->hash, val, {
         uct_md_h md = val.ucp_ctx->tl_mds[val.md_idx].md;
         ucs_info("struct dt %p, dereg NC memh %p on md %p",
                  dt, val.noncontig.memh, md);
+        start = GET_TS();
         uct_md_mem_dereg_nc(md, val.noncontig.memh[0]);
+        nc_dereg += GET_TS() - start;
+        start = GET_TS();
         status = ucp_mem_rereg_mds(val.ucp_ctx, 0, NULL, 0, 0, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
                                    val.contig.memh, &val.contig.md_map);
+        mem_dereg += GET_TS() - start;
         assert(UCS_OK == status);
+        count++;
     })
     kh_destroy_inplace(dt_struct, &dt->hash);
     ucs_free(dt->desc);
     UCS_STATS_NODE_FREE(dt->stats);
     ucs_free(dt);
+
+    char buf[256];
+    sprintf(buf, "%d", count);
+    setenv("MY_UCX_DEBUG_CNT", buf, 1);
+    sprintf(buf, "%lf", nc_dereg);
+    setenv("MY_UCX_DEBUG_NCDEREG", buf, 1);
+    sprintf(buf, "%lf", mem_dereg);
+    setenv("MY_UCX_DEBUG_MEMDEREG", buf, 1);
 }
 
 void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
