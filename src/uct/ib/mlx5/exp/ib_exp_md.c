@@ -597,6 +597,7 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     struct ibv_exp_send_wr *bad_wr;
     int ret;
     char buf[256];
+    char *ptr;
 
     _dump_umr_mgmt(umr, "Dereg");
 
@@ -606,13 +607,18 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
                                  IBV_EXP_SEND_SIGNALED;
     wr->ext_op.umr.modified_mr = umr->memh.mr;
 
-    double start = GET_TS();
+    double start = GET_TS(), interval;
     /* Post UMR */
     ret = ibv_exp_post_send(qp, wr, &bad_wr);
     if (ret) {
         ucs_fatal("ibv_exp_post_send(UMR_INV) failed: %m");
     }
-    sprintf(buf, "%lf", GET_TS() - start);
+
+    interval = GET_TS() - start;
+    if((ptr = getenv("MY_UCX_DEBUG_NC_POST"))) {
+        interval += atof(ptr);
+    }
+    sprintf(buf, "%lf", interval);
     setenv("MY_UCX_DEBUG_NC_POST", buf, 1);
 
     start = GET_TS();
@@ -630,12 +636,22 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
             ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
         }
     }
-    sprintf(buf, "%lf", GET_TS() - start);
+
+    interval = GET_TS() - start;
+    if((ptr = getenv("MY_UCX_DEBUG_NC_WAIT"))) {
+        interval += atof(ptr);
+    }
+    sprintf(buf, "%lf", interval);
     setenv("MY_UCX_DEBUG_NC_WAIT", buf, 1);
 
     start = GET_TS();
     ibv_dereg_mr(umr->memh.mr);
-    sprintf(buf, "%lf", GET_TS() - start);
+
+    interval = GET_TS() - start;
+    if((ptr = getenv("MY_UCX_DEBUG_NC_MR"))) {
+        interval += atof(ptr);
+    }
+    sprintf(buf, "%lf", interval);
     setenv("MY_UCX_DEBUG_NC_MR", buf, 1);
 
     ucs_free(umr);
