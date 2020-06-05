@@ -426,6 +426,12 @@ ucs_status_t uct_md_mem_reg_nc(uct_md_h md, const uct_iov_t *iov,
 
 ucs_status_t uct_md_mem_dereg_nc(uct_md_h md, uct_mem_h memh)
 {
+    {
+        int delay = 1;
+        while(delay) {
+            sleep(1);
+        }
+    }
     return md->ops->mem_dereg_nc(md, memh);
 }
 
