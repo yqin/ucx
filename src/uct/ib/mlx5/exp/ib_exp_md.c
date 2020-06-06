@@ -52,6 +52,92 @@ struct uct_ib_umr {
     int under_dbg, dt_num, dt_count;
 };
 
+typedef struct {
+    ucs_queue_elem_t super;
+    struct ibv_mr *mr;
+} uct_ib_umr_mr_pool_elem_t;
+
+#define UMR_MR_POOL_GROW_SIZE 16
+
+static ucs_queue_head_t _umr_mr_pool;
+
+static struct ibv_mr *
+_alloc_umr_pool_elem(uct_ib_mlx5_md_t *md)
+{
+    struct ibv_exp_create_mr_in mrin = {};
+    struct ibv_exp_device_attr *dev_attr = &md->super.dev.dev_attr;
+    (void)dev_attr;
+
+    /* Create indirect MR */
+    mrin.pd                     = md->super.pd;
+    mrin.attr.create_flags      = IBV_EXP_MR_INDIRECT_KLMS;
+    mrin.attr.exp_access_flags  = UCT_IB_MEM_ACCESS_FLAGS;
+    mrin.attr.max_klm_list_size = 128; //IBV_DEVICE_UMR_CAPS(dev_attr, max_klm_list_size);
+    return ibv_exp_create_mr(&mrin);
+}
+
+static void _umr_mr_pool_grow(uct_ib_mlx5_md_t *md, int size)
+{
+    int i;
+
+    /* Pre-populate the MR pool */
+    for(i = 0; i < size; i++) {
+        uct_ib_umr_mr_pool_elem_t *elem;
+        elem = calloc(1, sizeof(*elem));
+        elem->mr = _alloc_umr_pool_elem(md);
+        ucs_queue_push(&_umr_mr_pool, &elem->super);
+    }
+}
+
+static void _umr_mr_pool_init(uct_ib_mlx5_md_t *md)
+{
+    ucs_queue_head_init(&_umr_mr_pool);
+}
+
+static void _umr_mr_pool_cleanup()
+{
+    uct_ib_umr_mr_pool_elem_t *elem;
+    while(!ucs_queue_is_empty(&_umr_mr_pool)) {
+        elem = (void*)ucs_queue_pull(&_umr_mr_pool);
+        ibv_dereg_mr(elem->mr);
+        free(elem);
+    }
+}
+
+static struct ibv_mr *
+_umr_mr_pool_get(uct_ib_mlx5_md_t *md)
+{
+    int grow_size = UMR_MR_POOL_GROW_SIZE;
+    uct_ib_umr_mr_pool_elem_t *elem;
+    struct ibv_mr *ret = NULL;
+
+    if(ucs_queue_is_empty(&_umr_mr_pool)) {
+        _umr_mr_pool_grow(md, grow_size);
+    }
+
+    elem = (void*)ucs_queue_pull(&_umr_mr_pool);
+    if (NULL == elem) {
+        goto exit;
+    }
+
+    ret = elem->mr;
+    free(elem);
+exit:
+    return ret;
+}
+
+static void
+_umr_mr_pool_put(struct ibv_mr *mr)
+{
+    uct_ib_umr_mr_pool_elem_t *elem;
+    elem = calloc(1, sizeof(*elem));
+    elem->mr = mr;
+    ucs_queue_push(&_umr_mr_pool, &elem->super);
+}
+
+
+
+
 static ucs_status_t uct_ib_mlx5_reg_key(uct_ib_md_t *md, void *address,
                                         size_t length, uint64_t access,
                                         uct_ib_mem_t *ib_memh)
@@ -460,7 +546,6 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
 {
     uct_ib_mlx5_mem_t *ib_memh       = ucs_derived_of(memh, uct_ib_mlx5_mem_t);
     struct ibv_wc wc                 = {};
-    struct ibv_exp_create_mr_in mrin = {};
     uct_ib_umr_t *umr                = ib_memh->umr;
     struct ibv_exp_send_wr *wr       = &umr->wr;
     struct ibv_exp_send_wr *bad_wr;
@@ -472,11 +557,7 @@ uct_ib_mlx5_exp_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     umr->under_dbg = 0;
 
     /* Create indirect MR */
-    mrin.pd                     = md->super.pd;
-    mrin.attr.create_flags      = IBV_EXP_MR_INDIRECT_KLMS;
-    mrin.attr.exp_access_flags  = UCT_IB_MEM_ACCESS_FLAGS;
-    mrin.attr.max_klm_list_size = umr->iov_count;
-    umr->memh.mr = ibv_exp_create_mr(&mrin);
+    umr->memh.mr = _umr_mr_pool_get(md);
     if (!umr->memh.mr) {
         ucs_error("ibv_exp_create_mr() failed: %m");
         return UCS_ERR_NO_MEMORY;
@@ -645,7 +726,7 @@ uct_ib_mlx5_exp_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp,
     setenv("MY_UCX_DEBUG_NC_WAIT", buf, 1);
 
     start = GET_TS();
-    ibv_dereg_mr(umr->memh.mr);
+    _umr_mr_pool_put(umr->memh.mr);
 
     interval = GET_TS() - start;
     if((ptr = getenv("MY_UCX_DEBUG_NC_MR"))) {
@@ -1182,6 +1263,9 @@ static ucs_status_t uct_ib_mlx5_exp_md_open(struct ibv_device *ibv_device,
 
     dev->flags |= UCT_IB_DEVICE_FLAG_MLX5_PRM;
     *p_md = &md->super;
+
+    _umr_mr_pool_init(md);
+
     return UCS_OK;
 
 err_free:
@@ -1196,6 +1280,8 @@ void uct_ib_mlx5_exp_md_cleanup(uct_ib_md_t *ibmd)
 {
 #if HAVE_EXP_UMR
     uct_ib_mlx5_md_t *md = ucs_derived_of(ibmd, uct_ib_mlx5_md_t);
+
+    _umr_mr_pool_cleanup();
 
     if (md->umr_qp != NULL) {
         uct_ib_destroy_qp(md->umr_qp);
