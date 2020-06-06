@@ -8,6 +8,7 @@
 #  include "config.h"
 #endif
 
+#include "dt.h"
 #include "dt_struct.h"
 #include "dt_contig.h"
 #include "dt_iov.h"
@@ -40,6 +41,35 @@ ucs_status_t _struct_register_ep_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
 ucs_status_t _struct_register_rec(ucp_dt_struct_t *s,
                                   ucp_dt_struct_hash_value_t *val,
                                   void *buf);
+
+int ucp_dt_struct_equal(ucp_dt_struct_t *dt1, ucp_dt_struct_t *dt2)
+{
+    int i;
+
+    if (dt1->desc_count != dt2->desc_count) {
+        return 0;
+    }
+
+    /* Check all displacements & extents first */
+    for (i = 0; i < dt1->desc_count; i++) {
+        if(dt1->desc[i].displ != dt2->desc[i].displ) {
+            return 0;
+        }
+        if(dt1->desc[i].extent != dt2->desc[i].extent) {
+            return 0;
+        }
+    }
+
+    /* If all displacements are the same - compare datatypes */
+    for (i = 0; i < dt1->desc_count; i++) {
+        if (!ucp_dt_equal(dt1->desc[i].dt, dt2->desc[i].dt)) {
+            return 0;
+        }
+    }
+
+    /* If all checks are successful - the types are equal! */
+    return 1;
+}
 
 static void _set_struct_attributes(ucp_dt_struct_t *s)
 {

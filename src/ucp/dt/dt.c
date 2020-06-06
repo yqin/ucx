@@ -51,6 +51,27 @@ size_t ucp_dt_extent(ucp_datatype_t datatype)
     abort();
 }
 
+int ucp_dt_equal(ucp_datatype_t dt1, ucp_datatype_t dt2)
+{
+    if( (dt1 & UCP_DATATYPE_CLASS_MASK) !=  (dt2 & UCP_DATATYPE_CLASS_MASK) ){
+        /* Different classes of datatypes */
+        return 0;
+    }
+
+    switch (dt1 & UCP_DATATYPE_CLASS_MASK) {
+    case UCP_DATATYPE_CONTIG:
+        return (ucp_contig_dt_length(dt1, 1) == ucp_contig_dt_length(dt2, 1));
+    case UCP_DATATYPE_STRUCT:
+        return ucp_dt_struct_equal(ucp_dt_struct(dt1), ucp_dt_struct(dt2));
+    case UCP_DATATYPE_IOV:
+    case UCP_DATATYPE_GENERIC:
+        /* TODO: define the behavior */
+    default:
+        ucs_bug("Invalid data type");
+    }
+    abort();
+}
+
 size_t ucp_dt_low_bound(ucp_datatype_t datatype)
 {
     switch (datatype & UCP_DATATYPE_CLASS_MASK) {

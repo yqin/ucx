@@ -87,6 +87,11 @@ static inline size_t ucp_dt_struct_extent(const ucp_dt_struct_t *s)
 }
 
 /**
+ * Compare 2 struct datatypes
+ */
+int ucp_dt_struct_equal(ucp_dt_struct_t *dt1, ucp_dt_struct_t *dt2);
+
+/**
  * Get the total length of the structured datatype
  */
 static inline size_t ucp_dt_struct_lb(const ucp_dt_struct_t *s)
