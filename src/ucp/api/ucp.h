@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include <sys/types.h>
 
+#define DEBUG(EXP) {fprintf(stderr, "DEBUG(%s->%s[#%d]): " #EXP " = %d\n", __FILE__, __FUNCTION__, __LINE__, EXP);}
+
 BEGIN_C_DECLS
 
 /**

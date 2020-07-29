@@ -251,6 +251,8 @@ ucs_status_t ucp_do_am_zcopy_single(uct_pending_req_t *self, uint8_t am_id,
     ucp_dt_state_t state   = req->send.state.dt;
     ucs_status_t status;
 
+    //DEBUG(3);
+
     req->send.lane = ucp_ep_get_am_lane(ep);
 
     ucp_dt_iov_copy_uct(ep->worker->context,iov, &iovcnt, max_iov,
@@ -308,6 +310,8 @@ ucs_status_t ucp_do_am_zcopy_multi(uct_pending_req_t *self, uint8_t am_id_first,
     ucs_status_t status;
     uct_ep_h uct_ep;
     int pending_adde_res;
+
+    //DEBUG(4);
 
     if (enable_am_bw && (req->send.state.dt.offset != 0)) {
         req->send.lane = ucp_send_request_get_am_bw_lane(req);

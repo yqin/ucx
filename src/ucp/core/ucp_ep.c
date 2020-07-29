@@ -1435,7 +1435,10 @@ ucs_status_t ucp_ep_config_init(ucp_worker_h worker, ucp_ep_config_t *config,
 
             /* GET Zcopy */
             if (iface_attr->cap.flags & UCT_IFACE_FLAG_GET_ZCOPY) {
-                config->tag.rndv.min_get_zcopy = ucs_max(config->tag.rndv.min_get_zcopy,
+                /* YQ: DEBUG */
+                //config->tag.rndv.min_get_zcopy = ucs_max(config->tag.rndv.min_get_zcopy,
+                //                                         iface_attr->cap.get.min_zcopy);
+                config->tag.rndv.min_get_zcopy = ucs_min(config->tag.rndv.min_get_zcopy,
                                                          iface_attr->cap.get.min_zcopy);
 
                 config->tag.rndv.max_get_zcopy = ucs_min(config->tag.rndv.max_get_zcopy,
