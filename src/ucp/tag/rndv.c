@@ -76,7 +76,7 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
                                                  sreq->send.state.dt.dt.contig.memh,
                                                  sreq->send.mem_type,
                                                  rndv_rts_hdr + 1);
-        } else if (UCP_DT_IS_STRUCT(sreq->send.datatype)) {
+        } else {
             packed_rkey_size = ucp_rkey_pack_uct(worker->context,
                                                  sreq->send.state.dt.dt.struct_dt.non_contig.md_map,
                                                  sreq->send.state.dt.dt.struct_dt.non_contig.memh,
@@ -127,11 +127,19 @@ static size_t ucp_tag_rndv_rtr_pack(void *dest, void *arg)
         rndv_rtr_hdr->size    = rndv_req->send.rndv_rtr.length;
         rndv_rtr_hdr->offset  = rreq->recv.frag.offset;
 
-        packed_rkey_size = ucp_rkey_pack_uct(rndv_req->send.ep->worker->context,
-                                             rreq->recv.state.dt.contig.md_map,
-                                             rreq->recv.state.dt.contig.memh,
-                                             rreq->recv.mem_type,
-                                             rndv_rtr_hdr + 1);
+        if (UCP_DT_IS_CONTIG(rreq->recv.datatype)) {
+            packed_rkey_size = ucp_rkey_pack_uct(rndv_req->send.ep->worker->context,
+                                                 rreq->recv.state.dt.contig.md_map,
+                                                 rreq->recv.state.dt.contig.memh,
+                                                 rreq->recv.mem_type,
+                                                 rndv_rtr_hdr + 1);
+        } else {
+            packed_rkey_size = ucp_rkey_pack_uct(rndv_req->send.ep->worker->context,
+                                                 rreq->recv.state.dt.struct_dt.non_contig.md_map,
+                                                 rreq->recv.state.dt.struct_dt.non_contig.memh,
+                                                 rreq->recv.mem_type,
+                                                 rndv_rtr_hdr + 1);
+        }
         if (packed_rkey_size < 0) {
             return packed_rkey_size;
         }
