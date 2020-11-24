@@ -143,6 +143,9 @@ ucp_dt_recv_state_init(ucp_dt_state_t *dt_state, void *buffer,
         ucs_trace("dt state %p buffer %p count %zu dt_gen state=%p", dt_state,
                   buffer, dt_count, dt_state->dt.generic.state);
         break;
+    case UCP_DATATYPE_STRUCT:
+        dt_state->dt.struct_dt.contig.md_map        = 0;
+        dt_state->dt.struct_dt.non_contig.md_map    = 0;
     default:
         break;
     }

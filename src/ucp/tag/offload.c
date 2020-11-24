@@ -412,7 +412,8 @@ UCS_PROFILE_FUNC(int, ucp_tag_offload_post, (req, req_queue),
     ucp_worker_t *worker   = req->recv.worker;
     ucp_context_t *context = worker->context;
 
-    if (!UCP_DT_IS_CONTIG(req->recv.datatype)) {
+    if (!(UCP_DT_IS_CONTIG(req->recv.datatype) || 
+          UCP_DT_IS_STRUCT(req->recv.datatype))) {
         /* Non-contig buffers not supported yet. */
         UCP_WORKER_STAT_TAG_OFFLOAD(worker, BLOCK_NON_CONTIG);
         return 0;

@@ -137,7 +137,9 @@ ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
                                        contig_memh, uct_mem_h* memh,
                                        ucp_md_map_t *md_map_p);
 
-ucs_status_t ucp_dt_struct_register(ucp_context_t *context, ucp_md_index_t md_idx,
+ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
+                                    //ucp_md_map_t md_map,
+                                    ucp_md_index_t md_idx,
                                     void *buf, ucp_datatype_t dt,
                                     uct_mem_h* memh,
                                     ucp_md_map_t *md_map_p);

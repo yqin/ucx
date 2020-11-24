@@ -182,7 +182,6 @@ static size_t _dte_pack( const ucp_dt_struct_t *s,
     ptrdiff_t elem_offs = 0;
     ucp_dt_struct_t *sub_s;
 
-    //DEBUG(0);
 
     /* Seek for the offset */
     elem_idx = _elem_by_offset(s, out_offset_orig, &elem_offs_int, &elem_rep_num);
@@ -598,7 +597,9 @@ ucs_status_t _struct_register_rec(ucp_dt_struct_t *s,
     return UCS_OK;
 }
 
-ucs_status_t ucp_dt_struct_register(ucp_context_t *context, ucp_md_index_t md_idx,
+ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
+                                    //ucp_md_map_t md_map,
+                                    ucp_md_index_t md_idx,
                                     void *buf, ucp_datatype_t dt,
                                     uct_mem_h* memh,
                                     ucp_md_map_t *md_map_p)
@@ -610,12 +611,13 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context, ucp_md_index_t md_id
     ucs_assert_always(UCP_DT_IS_STRUCT(dt));
 
     /* register contig memory block covering the whole struct
-     * This will ensure that the memory wil not be invalidated
+     * This will ensure that the memory will not be invalidated
      */
     val.ucp_ctx = context;
     val.md_idx = md_idx;
     val.contig.md_map = 0;
     status = ucp_mem_rereg_mds(val.ucp_ctx, UCS_BIT(val.md_idx),
+    //status = ucp_mem_rereg_mds(val.ucp_ctx,md_map,
                                buf + s->lb_displ,
                                s->extent,
                                UCT_MD_MEM_ACCESS_ALL, NULL,
@@ -627,16 +629,18 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context, ucp_md_index_t md_id
     printf("STRUCT reg: addr=%p, datatype=%p\n", buf, s);
 #endif
 
-    ucs_info("Register struct on md, dt %ld, len %ld", dt, s->len);
+    ucs_info("Register struct on md, dt 0x%x, len %ld", dt, s->len);
 
     status = _struct_register_rec(s, &val, buf);
     if (status == UCS_OK) {
-        //*md_map_p = UCS_BIT(md_idx);
+        *md_map_p = UCS_BIT(md_idx);
+        /* YQ: should we change to below? */
+        //*md_map_p = md_map;
         _to_cache(s, buf, &val);
 
     }
     *memh = val.noncontig.memh[0];
-    if (*memh) (*md_map_p)++;
+    //if (*memh) (*md_map_p)++;
 
     return status;
 }

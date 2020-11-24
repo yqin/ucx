@@ -69,14 +69,19 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
         ucp_rndv_is_get_zcopy(sreq->send.mem_type,
                               worker->context->config.ext.rndv_mode)) {
         /* pack rkey, ask target to do get_zcopy */
-        rndv_rts_hdr->address = (uintptr_t)sreq->send.buffer;
         if (UCP_DT_IS_CONTIG(sreq->send.datatype)) {
+            rndv_rts_hdr->address = (uintptr_t)sreq->send.buffer;
             packed_rkey_size = ucp_rkey_pack_uct(worker->context,
                                                  sreq->send.state.dt.dt.contig.md_map,
                                                  sreq->send.state.dt.dt.contig.memh,
                                                  sreq->send.mem_type,
                                                  rndv_rts_hdr + 1);
         } else {
+            /* YQ: here base address needs to be the lower bound instead of the
+             *     actual buffer addr */
+            ucp_dt_struct_t *s = ucp_dt_struct(sreq->send.datatype);
+            rndv_rts_hdr->address = (uintptr_t)sreq->send.buffer + s->lb_displ;
+
             packed_rkey_size = ucp_rkey_pack_uct(worker->context,
                                                  sreq->send.state.dt.dt.struct_dt.non_contig.md_map,
                                                  sreq->send.state.dt.dt.struct_dt.non_contig.memh,
@@ -123,17 +128,22 @@ static size_t ucp_tag_rndv_rtr_pack(void *dest, void *arg)
     /* Pack remote keys (which can be empty list) */
     if (UCP_DT_IS_CONTIG(rreq->recv.datatype) ||
         UCP_DT_IS_STRUCT(rreq->recv.datatype)) {
-        rndv_rtr_hdr->address = (uintptr_t)rreq->recv.buffer;
         rndv_rtr_hdr->size    = rndv_req->send.rndv_rtr.length;
         rndv_rtr_hdr->offset  = rreq->recv.frag.offset;
 
         if (UCP_DT_IS_CONTIG(rreq->recv.datatype)) {
+            rndv_rtr_hdr->address = (uintptr_t)rreq->recv.buffer;
             packed_rkey_size = ucp_rkey_pack_uct(rndv_req->send.ep->worker->context,
                                                  rreq->recv.state.dt.contig.md_map,
                                                  rreq->recv.state.dt.contig.memh,
                                                  rreq->recv.mem_type,
                                                  rndv_rtr_hdr + 1);
         } else {
+            /* YQ: here base address needs to be the lower bound instead of the
+             *     actual buffer addr */
+            ucp_dt_struct_t *s = ucp_dt_struct(rreq->recv.datatype);
+            rndv_rtr_hdr->address = (uintptr_t)rreq->recv.buffer + s->lb_displ;
+
             packed_rkey_size = ucp_rkey_pack_uct(rndv_req->send.ep->worker->context,
                                                  rreq->recv.state.dt.struct_dt.non_contig.md_map,
                                                  rreq->recv.state.dt.struct_dt.non_contig.memh,
@@ -445,8 +455,6 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_get_zcopy, (self),
     size_t tail;
     int pending_add_res;
     ucp_lane_index_t lane;
-
-    //DEBUG(2);
 
     ucp_rndv_get_lanes_count(rndv_req);
 
@@ -804,7 +812,6 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_matched, (worker, rreq, rndv_rts_hdr),
     /* if the receive side is not connected yet then the RTS was received on a stub ep */
     ep        = rndv_req->send.ep;
     rndv_mode = worker->context->config.ext.rndv_mode;
-    if (!rreq->send.ep) rreq->send.ep = ep;
 
     if (ucp_rndv_is_rkey_ptr(rndv_rts_hdr, ep, rreq->recv.mem_type, rndv_mode)) {
         ucp_rndv_do_rkey_ptr(rndv_req, rreq, rndv_rts_hdr);
@@ -834,6 +841,8 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_matched, (worker, rreq, rndv_rts_hdr),
         }
         /* put protocol is allowed - register receive buffer memory for rma */
         ucs_assert(rndv_rts_hdr->size <= rreq->recv.length);
+        /* YQ: for put protocol, receiver needs a valid ep for UMR registration */
+        rreq->send.ep = ep;
         ucp_request_recv_buffer_reg(rreq, ucp_ep_config(ep)->key.rma_bw_md_map,
                                     rndv_rts_hdr->size);
     }
@@ -960,8 +969,6 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
     uct_iov_t iov[max_iovcnt];
     size_t iovcnt;
     ucp_dt_state_t state;
-
-    //DEBUG(1);
 
     if (!sreq->send.mdesc) {
         status = ucp_request_send_buffer_reg_lane(sreq, sreq->send.lane, 0);

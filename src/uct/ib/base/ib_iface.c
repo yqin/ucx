@@ -716,8 +716,8 @@ ucs_status_t uct_ib_iface_create_qp(uct_ib_iface_t *iface,
     qp = ibv_create_qp(uct_ib_iface_md(iface)->pd, &attr->ibv);
 #endif
     if (qp == NULL) {
-        ucs_error("iface=%p: failed to create %s QP TX wr:%d sge:%d inl:%d RX wr:%d sge:%d inl %d: %m",
-                  iface, uct_ib_qp_type_str(attr->qp_type),
+        ucs_error("iface=%p: failed to create %s QP on %s:%d TX wr:%d sge:%d inl:%d RX wr:%d sge:%d inl %d: %m",
+                  iface, uct_ib_qp_type_str(attr->qp_type), uct_ib_device_name(dev), iface->config.port_num,
                   attr->cap.max_send_wr, attr->cap.max_send_sge, attr->cap.max_inline_data,
                   attr->cap.max_recv_wr, attr->cap.max_recv_sge, attr->max_inl_recv);
         return UCS_ERR_IO_ERROR;
