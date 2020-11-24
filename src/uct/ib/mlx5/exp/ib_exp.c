@@ -40,7 +40,9 @@ void uct_ib_exp_qp_fill_attr(uct_ib_iface_t *iface, uct_ib_qp_attr_t *attr)
 #if HAVE_IBV_EXP_QP_CREATE_UMR
     attr->ibv.comp_mask           |= IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS | IBV_EXP_QP_INIT_ATTR_MAX_INL_KLMS;
     attr->ibv.exp_create_flags     = IBV_EXP_QP_CREATE_UMR;
-    attr->ibv.max_inl_send_klms    = uct_ib_iface_md(iface)->config.max_inline_klm_list;
+    /* YQ: hardcode this number for now since we seem to be hitting hardware limit */
+    //attr->ibv.max_inl_send_klms    = uct_ib_iface_md(iface)->config.max_inline_klm_list;
+    attr->ibv.max_inl_send_klms    = 7;
 #endif
 }
 
