@@ -287,7 +287,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                       ucs_status_string(status));
             return status;
         }
-        ucs_info("registered contig memh for %p struct, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %d",
+        ucs_info("registered contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %d",
                  s, buffer, s->len, s->lb_displ, s->extent, state->dt.struct_dt.contig.memh[0],
                   s->rep_count, state->dt.struct_dt.contig.md_map);
 
@@ -297,15 +297,23 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                                            state->dt.struct_dt.non_contig.memh,
                                            &state->dt.struct_dt.non_contig.md_map);
                                               */
+#if 0
         /* YQ: md_idx is incorrect here */
-        //md_idx = 5;
+        md_idx = 5;
         status = ucp_dt_struct_register(context, md_idx, buffer, datatype,
                                         state->dt.struct_dt.non_contig.memh,
                                         &state->dt.struct_dt.non_contig.md_map);
+#else
+        status = ucp_dt_struct_register_mds(context, md_map, buffer, datatype,
+                                            UCT_MD_MEM_ACCESS_ALL,
+                                            UCS_MEMORY_TYPE_HOST,
+                                            state->dt.struct_dt.non_contig.memh,
+                                            &state->dt.struct_dt.non_contig.md_map);
+#endif
         if (status != UCS_OK) {
             goto err;
         }
-        ucs_info("registered non_contig memh for %p struct, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %d",
+        ucs_info("registered non_contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %d",
                  s, buffer, s->len, s->lb_displ, s->extent, state->dt.struct_dt.non_contig.memh[0],
                   s->rep_count, state->dt.struct_dt.non_contig.md_map);
         UCS_STATS_UPDATE_COUNTER(s->stats, UCP_DT_STRUCT_STAT_CREATE, 1);

@@ -598,7 +598,6 @@ ucs_status_t _struct_register_rec(ucp_dt_struct_t *s,
 }
 
 ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
-                                    //ucp_md_map_t md_map,
                                     ucp_md_index_t md_idx,
                                     void *buf, ucp_datatype_t dt,
                                     uct_mem_h* memh,
@@ -617,7 +616,6 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     val.md_idx = md_idx;
     val.contig.md_map = 0;
     status = ucp_mem_rereg_mds(val.ucp_ctx, UCS_BIT(val.md_idx),
-    //status = ucp_mem_rereg_mds(val.ucp_ctx,md_map,
                                buf + s->lb_displ,
                                s->extent,
                                UCT_MD_MEM_ACCESS_ALL, NULL,
@@ -634,13 +632,79 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     status = _struct_register_rec(s, &val, buf);
     if (status == UCS_OK) {
         *md_map_p = UCS_BIT(md_idx);
-        /* YQ: should we change to below? */
-        //*md_map_p = md_map;
         _to_cache(s, buf, &val);
 
     }
     *memh = val.noncontig.memh[0];
     //if (*memh) (*md_map_p)++;
 
+    return status;
+}
+
+ucs_status_t ucp_dt_struct_register_mds(ucp_context_t *context,
+                                        ucp_md_map_t reg_md_map,
+                                        void *buffer,
+                                        ucp_datatype_t datatype,
+                                        unsigned uct_flags,
+                                        ucs_memory_type_t mem_type,
+                                        uct_mem_h *uct_memh,
+                                        ucp_md_map_t *md_map_p)
+{
+    unsigned memh_index;
+    ucp_md_map_t new_md_map;
+    const uct_md_attr_t *md_attr;
+    unsigned md_index;
+    ucs_status_t status;
+    ucs_log_level_t level;
+
+    if (reg_md_map == *md_map_p) {
+        return UCS_OK;
+    }
+
+    /* Go over requested MD map to register new handles. */
+    new_md_map      = 0;
+    memh_index      = 0;
+    ucs_for_each_bit(md_index, reg_md_map) {
+        md_attr = &context->tl_mds[md_index].attr;
+        if (md_attr->cap.flags & UCT_MD_FLAG_REG_NC) {
+            if (!(md_attr->cap.reg_mem_types & UCS_BIT(mem_type))) {
+                status = UCS_ERR_UNSUPPORTED;
+            } else {
+                status = ucp_dt_struct_register(context, md_index, buffer,
+                                                datatype,
+                                                &uct_memh[memh_index],
+                                                md_map_p);
+            }
+
+            if (status == UCS_OK) {
+                ucs_trace("registered non_contig address %p on md[%d] memh[%d]=%p",
+                          buffer, md_index, memh_index, uct_memh[memh_index]);
+                new_md_map |= UCS_BIT(md_index);
+                ++memh_index;
+                continue;
+            }
+
+            level = (uct_flags & UCT_MD_MEM_FLAG_HIDE_ERRORS) ?
+                    UCS_LOG_LEVEL_DEBUG : UCS_LOG_LEVEL_ERROR;
+
+            ucs_log(level,
+                    "failed to register non_contig address %p mem_type bit 0x%lx "
+                    "on md[%d]=%s: %s (md reg_mem_types 0x%lx)",
+                    buffer, UCS_BIT(mem_type), md_index,
+                    context->tl_mds[md_index].rsc.md_name,
+                    ucs_status_string(status), md_attr->cap.reg_mem_types);
+
+            if (!(uct_flags & UCT_MD_MEM_FLAG_HIDE_ERRORS)) {
+                goto error_out;
+            }
+        }
+    }
+
+    /* Update md_map, note that MDs which did not support registration will be
+     * missing from the map. */
+    *md_map_p = new_md_map;
+    status = UCS_OK;
+
+error_out:
     return status;
 }
