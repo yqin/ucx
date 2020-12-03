@@ -216,20 +216,56 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
                                             md_flags);
         break;
     case UCP_DATATYPE_STRUCT:
-        /* just single indirect memh */
-        s = ucp_dt_struct(datatype);
-        ucs_assert(md_flags & UCT_MD_FLAG_NEED_MEMH);
-        memh_index    = ucs_bitmap2idx(state->dt.struct_dt.non_contig.md_map,
-                                       md_index);
+#if 0
+        const uct_md_attr_t *md_attr;
+        md_attr = &context->tl_mds[md_index].attr;
+        ucs_info("md_index %d, component_name %s", md_index, md_attr->component_name);
+#endif
 
-        iov[0].memh   = state->dt.struct_dt.non_contig.memh[memh_index];
-        iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov,
-                                            state->offset + s->lb_displ);
-        iov[0].length = length_max;
-        iov[0].stride = 0;
-        iov[0].count  = 1;
-        *iovcnt       = 1;
-        length_it     = iov[0].length;
+#if 0
+        /* YQ: if MD does not support non-contiguous DT, fill iov, so we need
+         *     the size of the iov to be big enough
+         */
+        if (md_flags & UCT_MD_FLAG_REG_NC) {
+#endif
+            /* just single indirect memh */
+            s = ucp_dt_struct(datatype);
+            ucs_assert(md_flags & UCT_MD_FLAG_NEED_MEMH);
+            memh_index    = ucs_bitmap2idx(state->dt.struct_dt.non_contig.md_map,
+                                           md_index);
+            iov[0].memh   = state->dt.struct_dt.non_contig.memh[memh_index];
+            iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov,
+                                                state->offset + s->lb_displ);
+            iov[0].length = length_max;
+            iov[0].stride = 0;
+            iov[0].count  = 1;
+            *iovcnt       = 1;
+            length_it     = iov[0].length;
+#if 0
+        } else {
+            /* YQ: similar to ucp_dt_iov_copy_iov_uct, using _dte_pack as a
+             *     template, example below
+             */
+            iov[0].memh   = UCT_MEM_HANDLE_NULL;
+            iov[0].buffer = (char *)src_iov + 0;
+            iov[0].length = 8;
+            iov[0].stride = 0;
+            iov[0].count  = 1;
+            iov[1].memh   = UCT_MEM_HANDLE_NULL;
+            iov[1].buffer = (char *)src_iov + 12;
+            iov[1].length = 8;
+            iov[1].stride = 0;
+            iov[1].count  = 1;
+            iov[2].memh   = UCT_MEM_HANDLE_NULL;
+            iov[2].buffer = (char *)src_iov + 24;
+            iov[2].length = 8;
+            iov[2].stride = 0;
+            iov[2].count  = 1;
+            *iovcnt       = 3;
+            length_it     = length_max;
+        }
+#endif
+
         break;
     default:
         ucs_error("Invalid data type");

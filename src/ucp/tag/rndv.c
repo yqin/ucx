@@ -55,7 +55,12 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
 {
     ucp_request_t *sreq              = arg;   /* send request */
     ucp_rndv_rts_hdr_t *rndv_rts_hdr = dest;
-    ucp_worker_h worker              = sreq->send.ep->worker;
+    ucp_ep_h ep                      = sreq->send.ep;
+    ucp_worker_h worker              = ep->worker;
+    ucp_context_h context            = worker->context;
+    ucp_md_index_t md_index          = ucp_ep_md_index(ep, sreq->send.lane);
+    uct_md_attr_t md_attr            = context->tl_mds[md_index].attr;
+    uint64_t md_flags                = md_attr.cap.flags;
     ssize_t packed_rkey_size;
 
     rndv_rts_hdr->super.tag        = sreq->send.tag.tag;
@@ -65,7 +70,8 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
 
     /* Pack remote keys (which can be empty list) */
     if ((UCP_DT_IS_CONTIG(sreq->send.datatype) ||
-         UCP_DT_IS_STRUCT(sreq->send.datatype)) &&
+         (UCP_DT_IS_STRUCT(sreq->send.datatype) &&
+          (md_flags & UCT_MD_FLAG_NEED_MEMH))) &&
         ucp_rndv_is_get_zcopy(sreq->send.mem_type,
                               worker->context->config.ext.rndv_mode)) {
         /* pack rkey, ask target to do get_zcopy */
@@ -184,12 +190,18 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_proto_progress_rndv_rtr, (self),
 
 ucs_status_t ucp_tag_rndv_reg_send_buffer(ucp_request_t *sreq)
 {
-    ucp_ep_h ep = sreq->send.ep;
+    ucp_ep_h ep             = sreq->send.ep;
+    ucp_worker_h worker     = ep->worker;
+    ucp_context_h context   = worker->context;
+    ucp_md_index_t md_index = ucp_ep_md_index(ep, sreq->send.lane);
+    uct_md_attr_t md_attr   = context->tl_mds[md_index].attr;
+    uint64_t md_flags       = md_attr.cap.flags;
     ucp_md_map_t md_map;
     ucs_status_t status;
 
     if ((UCP_DT_IS_CONTIG(sreq->send.datatype) || 
-         UCP_DT_IS_STRUCT(sreq->send.datatype)) &&
+         (UCP_DT_IS_STRUCT(sreq->send.datatype) &&
+          (md_flags & UCT_MD_FLAG_NEED_MEMH))) &&
         ucp_rndv_is_get_zcopy(sreq->send.mem_type,
                               ep->worker->context->config.ext.rndv_mode)) {
 
@@ -771,6 +783,10 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_matched, (worker, rreq, rndv_rts_hdr),
     ucp_rndv_mode_t rndv_mode;
     ucp_request_t *rndv_req;
     ucp_ep_h ep;
+    ucp_context_h context;
+    ucp_md_index_t md_index;
+    uct_md_attr_t md_attr;
+    uint64_t md_flags;
 
     UCS_ASYNC_BLOCK(&worker->async);
 
@@ -818,8 +834,15 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_matched, (worker, rreq, rndv_rts_hdr),
         goto out;
     }
 
+    /* YQ: get md_flags from the stub ep */
+    context     = ep->worker->context;
+    md_index    = ucp_ep_md_index(ep, rndv_req->send.lane);
+    md_attr     = context->tl_mds[md_index].attr;
+    md_flags    = md_attr.cap.flags;
+    
     if (UCP_DT_IS_CONTIG(rreq->recv.datatype) || 
-        UCP_DT_IS_STRUCT(rreq->recv.datatype)) {
+        (UCP_DT_IS_STRUCT(rreq->recv.datatype) &&
+         (md_flags & UCT_MD_FLAG_NEED_MEMH))) {
         if ((rndv_rts_hdr->address != 0) &&
             (ucp_rndv_is_get_zcopy(rreq->recv.mem_type, rndv_mode)) &&
             /* is it allowed to use GET Zcopy for the current message? */
@@ -961,11 +984,20 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
                  uct_pending_req_t *self)
 {
     ucp_request_t *sreq     = ucs_container_of(self, ucp_request_t, send.uct);
-    const size_t max_iovcnt = 1;
     ucp_ep_h ep             = sreq->send.ep;
     ucs_status_t status;
     size_t offset, ucp_mtu, align, remainder, length;
-    uct_iface_attr_t *attrs;
+    uct_iface_attr_t *attrs = ucp_worker_iface_get_attr(ep->worker,
+                                ucp_ep_get_rsc_index(ep, sreq->send.lane));
+#if 1
+    const size_t max_iovcnt = 1;
+#else
+    /* YQ: note there is an alternative approach to handle put_zcopy for UMR -
+     *     use what the hardware allows for max_iovcnt to create iov, then fill
+     *     iov with STRUCT DT, see ucp_dt_iov_copy_uct() below for POC
+     */
+    const size_t max_iovcnt = attrs->cap.put.max_iov;
+#endif
     uct_iov_t iov[max_iovcnt];
     size_t iovcnt;
     ucp_dt_state_t state;
@@ -975,8 +1007,6 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
         ucs_assert_always(status == UCS_OK);
     }
 
-    attrs     = ucp_worker_iface_get_attr(ep->worker,
-                                          ucp_ep_get_rsc_index(ep, sreq->send.lane));
     align     = attrs->cap.put.opt_zcopy_align;
     ucp_mtu   = attrs->cap.put.align_mtu;
 
@@ -1329,6 +1359,9 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
     ucp_ep_h ep                      = sreq->send.ep;
     ucp_ep_config_t *ep_config       = ucp_ep_config(ep);
     ucp_context_h context            = ep->worker->context;
+    ucp_md_index_t md_index          = ucp_ep_md_index(ep, sreq->send.lane);
+    const uct_md_attr_t md_attr      = context->tl_mds[md_index].attr;
+    uint64_t md_flags                = md_attr.cap.flags;
     ucs_status_t status;
     int is_pipeline_rndv;
 
@@ -1342,8 +1375,11 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
         ucp_tag_offload_cancel_rndv(sreq);
     }
 
+
     if ((UCP_DT_IS_CONTIG(sreq->send.datatype) ||
-         UCP_DT_IS_STRUCT(sreq->send.datatype)) && rndv_rtr_hdr->address) {
+         (UCP_DT_IS_STRUCT(sreq->send.datatype) &&
+          (md_flags & UCT_MD_FLAG_NEED_MEMH))) &&
+        rndv_rtr_hdr->address) {
         status = ucp_ep_rkey_unpack(ep, rndv_rtr_hdr + 1,
                                     &sreq->send.rndv_put.rkey);
         if (status != UCS_OK) {
@@ -1401,7 +1437,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
     sreq->send.tag.rreq_ptr = rndv_rtr_hdr->rreq_ptr;
 
     if ((UCP_DT_IS_CONTIG(sreq->send.datatype) ||
-         UCP_DT_IS_STRUCT(sreq->send.datatype)) &&
+         (UCP_DT_IS_STRUCT(sreq->send.datatype) &&
+          (md_flags & UCT_MD_FLAG_NEED_MEMH))) &&
         (sreq->send.length >=
          ucp_ep_config(ep)->am.mem_type_zcopy_thresh[sreq->send.mem_type]))
     {

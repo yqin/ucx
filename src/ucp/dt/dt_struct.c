@@ -637,6 +637,7 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     }
     *memh = val.noncontig.memh[0];
     //if (*memh) (*md_map_p)++;
+    ucs_info("registered dt 0x%x length %zu on md[%d] memh[%d]=%p", dt, s->len, md_idx, 0, val.noncontig.memh[0]);
 
     return status;
 }
