@@ -8,6 +8,9 @@
 
 void uct_ib_exp_qp_fill_attr(uct_ib_iface_t *iface, uct_ib_qp_attr_t *attr)
 {
+    /* YQ: need to check this function for RDMA-Core */
+    code_path();
+
 #if HAVE_DECL_IBV_EXP_CREATE_QP
     if (!(attr->ibv.comp_mask & IBV_EXP_QP_INIT_ATTR_PD)) {
         attr->ibv.comp_mask       = IBV_EXP_QP_INIT_ATTR_PD;

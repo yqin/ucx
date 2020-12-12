@@ -371,6 +371,7 @@ uct_ib_mlx5_set_data_seg(struct mlx5_wqe_data_seg *dptr,
                          const void *address,
                          unsigned length, uint32_t lkey)
 {
+    ucs_info("address %p, length %d, lkey 0x%x", address, length, lkey);
     ucs_assert(((unsigned long)dptr % UCT_IB_MLX5_WQE_SEG_SIZE) == 0);
     dptr->byte_count = htonl(length);
     dptr->lkey       = htonl(lkey);

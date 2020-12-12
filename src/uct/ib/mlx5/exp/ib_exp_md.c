@@ -285,6 +285,7 @@ static ucs_status_t uct_ib_mlx5_exp_md_umr_qp_create(uct_ib_mlx5_md_t *md)
         ucs_error("failed to create UMR QP: %m");
         goto err_destroy_cq;
     }
+    ucs_info("created UMR QP on %s, QPN 0x%x", uct_ib_device_name(ibdev), md->umr_qp.qp_num);
 
     memset(&qp_attr, 0, sizeof(qp_attr));
 

@@ -176,6 +176,10 @@ typedef struct uct_ib_mlx5_md {
     ucs_spinlock_t           dbrec_lock;
 
     struct ibv_qp            *umr_qp;   /* special QP for creating UMR */
+#if HAVE_DV_UMR
+    struct ibv_qp_ex         *umr_qpx;  /* QP_EX for UMR */
+    struct mlx5dv_qp_ex      *umr_dv_qp;/* MLX5DV_QP for UMR */
+#endif
     struct ibv_cq            *umr_cq;   /* special CQ for creating UMR */
     ucs_mpool_t              mp;        /* Memory pool for UMR objects */
     struct ibv_mr*           (*get_mr)(uct_mem_h memh);

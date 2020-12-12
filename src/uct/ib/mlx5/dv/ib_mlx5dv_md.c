@@ -10,7 +10,9 @@
 #include <ucs/arch/bitops.h>
 #include <ucs/profile/profile.h>
 
-typedef struct {
+typedef struct uct_ib_mlx5_umr uct_ib_mlx5_umr_t;
+
+typedef struct uct_ib_mlx5_ksm_data {
     struct mlx5dv_devx_obj     *atomic_dvmr;
     int                        mr_num;
     size_t                     length;
@@ -29,12 +31,126 @@ typedef struct uct_ib_mlx5_mem {
         uct_ib_mlx5_ksm_data_t *ksm_data;
 #endif
     };
+    size_t                     umr_depth;
+    uct_ib_mlx5_umr_t          *umr;
 } uct_ib_mlx5_mem_t;
 
 typedef struct uct_ib_mlx5_dbrec_page {
     struct mlx5dv_devx_umem *mem;
 } uct_ib_mlx5_dbrec_page_t;
 
+typedef struct uct_ib_mlx5_umr {
+    uct_ib_mlx5_md_t       *md;
+    unsigned               depth;
+    int                    is_inline;
+    uct_ib_mlx5_mem_t      memh; /* memh for indirect mr*/
+    uct_ib_mlx5_mem_t      *contig_memh;
+    //struct ibv_exp_send_wr wr;
+    /* YQ: put the mkey here for now, will put it in memh.mr later */
+    struct mlx5dv_mkey     *mkey;
+    size_t                 repeat_count; /* 0 is not allowed; if 1 it is UMR
+                                            list, otherwise repeated block */
+    size_t                 iov_count;
+    uint64_t               base_addr;
+
+    uct_completion_t       comp;   /* completion routine */
+    //ep_post_dereg_f        dereg_f; /* endpoint WR posting function pointer */
+    uct_ep_t               *tl_ep;  /* registering endpoint - for cleanup */
+
+    /* debug */
+    //int under_dbg, dt_num, dt_count;
+} uct_ib_mlx5_umr_t;
+
+typedef struct uct_ib_mlx5_mem_region {
+    uint64_t base_addr;
+    struct   ibv_mr *mr;
+    size_t   length;
+} uct_ib_mlx5_mem_region_t;
+
+#if 0
+typedef struct uct_ib_mlx5_umr_mr_pool_elem {
+    ucs_queue_elem_t super;
+    struct ibv_mr *mr;
+} uct_ib_mlx5_umr_mr_pool_elem_t;
+
+#define UMR_MR_POOL_GROW_SIZE 16
+
+static ucs_queue_head_t _umr_mr_pool;
+
+static void _umr_mr_pool_init(uct_ib_mlx5_md_t *md)
+{
+    ucs_queue_head_init(&_umr_mr_pool);
+}
+
+static void _umr_mr_pool_cleanup()
+{
+    uct_ib_mlx5_umr_mr_pool_elem_t *elem;
+    while(!ucs_queue_is_empty(&_umr_mr_pool)) {
+        elem = (void*)ucs_queue_pull(&_umr_mr_pool);
+        ibv_dereg_mr(elem->mr);
+        free(elem);
+    }
+}
+
+static struct ibv_mr *
+_alloc_umr_pool_elem(uct_ib_mlx5_md_t *md)
+{
+    struct ibv_exp_create_mr_in mrin = {};
+    struct ibv_exp_device_attr *dev_attr = &md->super.dev.dev_attr;
+    (void)dev_attr;
+
+    /* Create indirect MR */
+    mrin.pd                     = md->super.pd;
+    mrin.attr.create_flags      = IBV_EXP_MR_INDIRECT_KLMS;
+    mrin.attr.exp_access_flags  = UCT_IB_MEM_ACCESS_FLAGS;
+    mrin.attr.max_klm_list_size = 128; //IBV_DEVICE_UMR_CAPS(dev_attr, max_klm_list_size);
+    return ibv_exp_create_mr(&mrin);
+}
+
+static void _umr_mr_pool_grow(uct_ib_mlx5_md_t *md, int size)
+{
+    int i;
+
+    /* Pre-populate the MR pool */
+    for(i = 0; i < size; i++) {
+        uct_ib_mlx5_umr_mr_pool_elem_t *elem;
+        elem = calloc(1, sizeof(*elem));
+        elem->mr = _alloc_umr_pool_elem(md);
+        ucs_queue_push(&_umr_mr_pool, &elem->super);
+    }
+}
+
+static struct ibv_mr *
+_umr_mr_pool_get(uct_ib_mlx5_md_t *md)
+{
+    int grow_size = UMR_MR_POOL_GROW_SIZE;
+    uct_ib_mlx5_umr_mr_pool_elem_t *elem;
+    struct ibv_mr *ret = NULL;
+
+    if(ucs_queue_is_empty(&_umr_mr_pool)) {
+        _umr_mr_pool_grow(md, grow_size);
+    }
+
+    elem = (void*)ucs_queue_pull(&_umr_mr_pool);
+    if (NULL == elem) {
+        goto exit;
+    }
+
+    ret = elem->mr;
+    free(elem);
+exit:
+    return ret;
+}
+
+static void
+_umr_mr_pool_put(struct ibv_mr *mr)
+{
+    uct_ib_mlx5_umr_mr_pool_elem_t *elem;
+    elem = calloc(1, sizeof(*elem));
+    elem->mr = mr;
+    ucs_queue_push(&_umr_mr_pool, &elem->super);
+}
+#endif
 
 static ucs_status_t uct_ib_mlx5_reg_key(uct_ib_md_t *md, void *address,
                                          size_t length, uint64_t access,
@@ -384,6 +500,683 @@ static ucs_status_t uct_ib_mlx5_devx_dereg_multithreaded(uct_ib_md_t *ibmd,
     return status;
 }
 
+static ucs_status_t
+uct_ib_mlx5_umr_fill_repeated(uct_ib_mlx5_umr_t *umr, const uct_iov_t *iov,
+                              size_t iov_count)
+{
+    code_path();
+#if 0
+    struct ibv_exp_send_wr *wr = &umr->wr;
+    struct ibv_exp_mem_repeat_block *mem_rep_list;
+    uint64_t base_addr = SIZE_MAX;
+    int i;
+
+    memset(wr, 0, sizeof(*wr));
+    mem_rep_list = ucs_calloc(iov_count, sizeof(*mem_rep_list), "UMR memlist");
+    if (mem_rep_list == NULL) {
+        ucs_error("can't allocated mem_repeat_block for UMR");
+        goto err_no_mem;
+    }
+
+    for(i = 0; i < iov_count; ++i) {
+        mem_rep_list[i].byte_count = ucs_calloc(1,
+                                                sizeof(mem_rep_list[i].byte_count[0]),
+                                                "byte_count");
+        if (mem_rep_list[i].byte_count == NULL) {
+            ucs_error("failed to allocate byte_cnt for mem_rep_list");
+            goto err_clean_mem_rep_list;
+        }
+        mem_rep_list[i].stride = ucs_calloc(1, sizeof(mem_rep_list[i].stride[0]),
+                                            "stride");
+        if (mem_rep_list[i].stride == NULL) {
+            ucs_error("failed to allocate stride for mem_rep_list");
+            goto err_clean_mem_rep_list;
+        }
+        mem_rep_list[i].mr            = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
+        mem_rep_list[i].base_addr     = (uint64_t)iov[i].buffer;
+        mem_rep_list[i].byte_count[0] = iov[i].length;
+        mem_rep_list[i].stride[0]     = iov[i].stride;
+        base_addr                     = ucs_min(mem_rep_list[i].base_addr, base_addr);
+        ucs_info("fill_replist(%d): addr %p(%ld), len %ld, stride %ld mr %p (memh %p)",
+                 i,iov[i].buffer,  mem_rep_list[i].base_addr , iov[i].length,
+                 iov[i].stride, mem_rep_list[i].mr, iov[i].memh);
+    }
+
+    umr->base_addr                                   = base_addr;
+    wr->ext_op.umr.umr_type                          = IBV_EXP_UMR_REPEAT;
+    wr->ext_op.umr.mem_list.rb.mem_repeat_block_list = mem_rep_list;
+    wr->ext_op.umr.mem_list.rb.repeat_count          = &umr->repeat_count;
+    wr->ext_op.umr.mem_list.rb.stride_dim            = 1;
+
+    return UCS_OK;
+
+err_clean_mem_rep_list:
+    for (i = 0; i < iov_count; ++i) {
+        ucs_free(mem_rep_list[i].byte_count);
+        ucs_free(mem_rep_list[i].stride);
+    }
+    ucs_free(mem_rep_list);
+err_no_mem:
+    return UCS_ERR_NO_MEMORY;
+#endif
+    return UCS_OK;
+}
+
+/* TODO: Support KSM */
+static ucs_status_t
+uct_ib_mlx5_umr_fill_region(uct_ib_mlx5_umr_t *umr, const uct_iov_t *iov,
+                                size_t iov_count)
+{
+    code_path();
+    //uct_ib_mlx5_mem_region_t *mem_reg;
+    //struct mlx5dv_mkey *master_key_mkey;
+    struct mlx5dv_mkey_init_attr mkey_init_attr = {};
+    struct ibv_sge *mkey_klms;
+    uint64_t base_addr = SIZE_MAX;
+    uint32_t access_flags;
+    int i;
+    struct ibv_wc wc = {};
+    int ret;
+    ucs_status_t status;
+
+#if 0
+    mem_reg = ucs_calloc(iov_count, sizeof(*mem_reg), "UMR memreg");
+    if (!mem_reg) {
+        ucs_fatal("can't allocate memory region list for UMR");;
+    }
+
+    for (i = 0; i < iov_count; i++) {
+        mem_reg[i].base_addr = (uint64_t)iov[i].buffer; /* mr->addr? */
+        mem_reg[i].length    = iov[i].length;
+        mem_reg[i].mr        = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr;
+        base_addr            = ucs_min(mem_reg[i].base_addr, base_addr);
+        ucs_info("fill_region(%d): addr %p(%ld), len %ld mr %p (memh %p)",
+                 i,iov[i].buffer,  mem_reg[i].base_addr , mem_reg[i].length, mem_reg[i].mr, iov[i].memh);
+    }
+
+    umr->base_addr                           = base_addr;
+#endif
+
+    /* create master key */
+    mkey_init_attr.pd = umr->md->super.pd;
+    mkey_init_attr.create_flags = MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT;
+    mkey_init_attr.max_entries = umr->iov_count;
+    umr->mkey = mlx5dv_create_mkey(&mkey_init_attr);
+    /* YQ: need to call mlx5dv_destroy_mkey(&umr->mkey) at tear-down */
+    if (umr->mkey == NULL) {
+        ucs_error("failed to create UMR master mkey: %m");
+        return UCS_ERR_IO_ERROR;
+    }
+    ucs_info("created UMR master mkey %p, lkey 0x%x, rkey 0x%x",
+             umr->mkey, umr->mkey->lkey, umr->mkey->lkey);
+
+    /* fill KLM entries */
+    mkey_klms = ucs_calloc(iov_count, sizeof(*mkey_klms), "UMR mkey klms");
+    for (i = 0; i < umr->iov_count; i++) {
+        mkey_klms[i].addr   = (uintptr_t)iov[i].buffer;
+        mkey_klms[i].length = iov[i].length;
+        mkey_klms[i].lkey   = ((uct_ib_mlx5_mem_t*)iov[i].memh)->mr->lkey;
+        base_addr           = ucs_min((uintptr_t)iov[i].buffer, base_addr);
+        ucs_info("fill_region(%d): addr %p, len %ld, lkey 0x%x, memh %p",
+                 i, iov[i].buffer, iov[i].length, mkey_klms[i].lkey, iov[i].memh);
+    }
+    umr->base_addr = base_addr;
+
+    /* register UMR */
+    ibv_wr_start(umr->md->umr_qpx);
+    access_flags = UCT_IB_MEM_ACCESS_FLAGS;
+    mlx5dv_wr_mr_list(umr->md->umr_dv_qp, umr->mkey, access_flags, umr->iov_count, mkey_klms);
+    status = ibv_wr_complete(umr->md->umr_qpx);
+    if (status) {
+        ucs_error("failed to post UMR WQE: %m");
+        goto err_out;
+    }
+
+    /* poll CQ */
+    for (;;) {
+        ret = ibv_poll_cq(umr->md->umr_cq, 1, &wc);
+        if (ret == 1) {
+            if (wc.status != IBV_WC_SUCCESS) {
+                ucs_fatal("UMR registration completed with error: %s vendor_err %d",
+                          ibv_wc_status_str(wc.status), wc.vendor_err);
+                status = UCS_ERR_IO_ERROR;
+                goto err_out;
+            }
+            if (wc.opcode != (enum ibv_wc_opcode)(MLX5DV_WC_UMR)) {
+                ucs_fatal("UMR registration completed with incorrect opcode: %d",
+                          wc.opcode);
+                status = UCS_ERR_IO_ERROR;
+                goto err_out;
+            }
+            break;
+        }
+        if (ret > 1) {
+            ucs_fatal("returned unexpected number of CQE - expected (1), returned (%d)", ret);
+            status = UCS_ERR_OUT_OF_RANGE;
+            goto err_out;
+        }
+        if (ret < 0) {
+            ucs_fatal("failed to pool CQ: %m");
+            status = UCS_ERR_IO_ERROR;
+            goto err_out;
+        }
+    }
+
+    ucs_info("UMR posted - registered pd %p, addr 0x%lx, mkey %p, lkey 0x%x, rkey 0x%x",
+             umr->md->super.pd, (uintptr_t)umr->base_addr, umr->mkey, umr->mkey->lkey, umr->mkey->rkey);
+
+    /* YQ: put the mkey here for now, will put it in memh.mr later */
+    umr->memh.super.lkey = umr->mkey->lkey;
+    umr->memh.super.rkey = umr->mkey->rkey;
+    ucs_info("UMR memh %p, lkey 0x%x, rkey 0x%x",
+             &umr->memh.super, umr->memh.super.lkey, umr->memh.super.rkey);
+#if 0
+    ucs_info("mr %p", umr->memh.mr);
+    umr->memh.mr = ibv_reg_mr(umr->md->super.pd, (void*)umr->base_addr, 24, access_flags);
+    ucs_info("mr %p", umr->memh.mr);
+    umr->memh.mr->lkey = umr->mkey->lkey;
+    umr->memh.mr->rkey = umr->mkey->rkey;
+#endif
+
+err_out:
+    return status;
+}
+
+static inline ucs_status_t
+uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
+                             size_t iovcnt, unsigned *klms_needed,
+                             unsigned *depth)
+{
+    code_path();
+    /* YQ: hard-coded before we could migrate to the correct API */
+#if 0
+    struct ibv_exp_device_attr *dev_attr = &md->super.dev.dev_attr;
+    unsigned max_depth = IBV_DEVICE_UMR_CAPS(dev_attr, max_umr_recursion_depth);
+    unsigned max_klm_list_size = IBV_DEVICE_UMR_CAPS(dev_attr, max_klm_list_size);
+#else
+    unsigned max_depth = 256;
+    unsigned max_klm_list_size = 256;
+#endif
+    unsigned iov_depth, umr_depth, iov_idx;
+
+    /* YQ: hard-coded before we could migrate to the correct API */
+#if 0
+    if (iovcnt > IBV_DEVICE_UMR_CAPS(dev_attr, max_klm_list_size)) {
+#else
+    if (iovcnt > max_klm_list_size) {
+#endif
+        return UCS_ERR_UNSUPPORTED;
+    }
+
+
+    for (iov_idx = 0, umr_depth = 0; iov_idx < iovcnt; iov_idx++) {
+        uct_mem_h iov_memh = iov[iov_idx].memh;
+        if (ucs_unlikely(!iov_memh)) {
+            ucs_error("Invalid memh in UCT iov");
+            return UCS_ERR_INVALID_PARAM;
+        }
+
+        /* Check if recursion depth limit is exceeded */
+        iov_depth = ((uct_ib_mlx5_mem_t*)(iov_memh))->umr_depth;
+        if (iov_depth > umr_depth) {
+            if (iov_depth >= max_depth) {
+                ucs_error("iov depth (%d) is bigger than max (%d)",
+                          iov_depth, umr_depth);
+                return UCS_ERR_UNSUPPORTED;
+            }
+            umr_depth = iov_depth;
+        }
+    }
+
+
+    *klms_needed = iovcnt;
+    *depth = umr_depth + 1;
+    ucs_info("UMR depth %d, klms_needed %d", *depth, *klms_needed);
+
+    return UCS_OK;
+}
+
+static ucs_status_t
+uct_ib_mlx5_umr_alloc(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
+                      size_t iov_count, size_t repeat_count,
+                      uct_ib_mem_t **memh_p)
+{
+    code_path();
+    uct_ib_mlx5_umr_t *umr;
+    ucs_status_t status;
+    unsigned klms_needed, umr_depth;
+
+    ucs_assert_always(repeat_count > 0);
+
+    status = uct_ib_md_calc_required_klms(md, iov, iov_count, &klms_needed,
+                                          &umr_depth);
+    if (status != UCS_OK) {
+        ucs_error("Invalid UMR format");
+        return status;
+    }
+
+    umr = ucs_calloc(1, sizeof(*umr), "umr");
+    if (umr == NULL) {
+        ucs_fatal("Can't allocate UMR");
+    }
+    //memset(&umr->wr, 0, sizeof(umr->wr));
+
+    /* YQ: currently RDMA-Core does not support non-inline UMR */
+    umr->is_inline    = 1;
+    umr->md           = md;
+    umr->repeat_count = repeat_count;
+    umr->depth        = umr_depth;
+    umr->iov_count    = iov_count;
+    umr->comp.count   = 1; /* for async reg */
+    umr->memh.umr     = umr;
+
+    if (repeat_count == 1) { /* MRs list */
+        status = uct_ib_mlx5_umr_fill_region(umr, iov, iov_count);
+    } else { /* stride/interleave */
+        status = uct_ib_mlx5_umr_fill_repeated(umr, iov, iov_count);
+    }
+
+    *memh_p = &umr->memh.super;
+
+    return status;
+}
+
+static ucs_status_t uct_ib_mlx5_umr_create_qp(uct_ib_mlx5_md_t *md)
+{
+    code_path();
+#if HAVE_DV_UMR
+    //struct ibv_exp_qp_init_attr qp_init_attr;
+    struct mlx5dv_qp_init_attr mlx5_qp_attr;
+    struct ibv_qp_init_attr_ex umr_qp_attr_ex;
+    struct ibv_qp_attr qp_attr;
+    uint8_t port_num;
+    int ret;
+    uct_ib_device_t *ibdev;
+    struct ibv_port_attr *port_attr;
+
+    ibdev = &md->super.dev;
+
+#if 0
+    /* YQ: need to check if device capability supports UMR or not */
+    //if (!(ibdev->dev_attr.exp_device_cap_flags & IBV_EXP_DEVICE_UMR) ||
+    if (!(ibdev->dev_attr.device_cap_flags_ex & (1<<6)) ||
+        !md->super.config.enable_indirect_atomic) {
+        return UCS_ERR_UNSUPPORTED;
+    }
+#endif
+
+    memset(&mlx5_qp_attr, 0, sizeof(struct mlx5dv_qp_init_attr));
+
+    mlx5_qp_attr.comp_mask |= MLX5DV_QP_INIT_ATTR_MASK_SEND_OPS_FLAGS;
+    mlx5_qp_attr.send_ops_flags = MLX5DV_QP_EX_WITH_MR_LIST | MLX5DV_QP_EX_WITH_MR_INTERLEAVED;
+
+    md->umr_cq = ibv_create_cq(ibdev->ibv_context, 1, NULL, NULL, 0);
+    if (md->umr_cq == NULL) {
+        ucs_error("failed to create UMR CQ: %m");
+        goto err;
+    }
+
+    /* YQ: do we need to do anything here? */
+#if HAVE_EXP_UMR
+    md->super.config.max_inline_klm_list =
+        ucs_min(md->super.config.max_inline_klm_list,
+                ibdev->dev_attr.umr_caps.max_send_wqe_inline_klms);
+#endif
+
+    memset(&umr_qp_attr_ex, 0, sizeof(struct ibv_qp_init_attr_ex));
+
+    umr_qp_attr_ex.send_cq             = md->umr_cq;
+    umr_qp_attr_ex.recv_cq             = md->umr_cq;
+    umr_qp_attr_ex.srq                 = NULL;
+    umr_qp_attr_ex.cap.max_send_wr     = 16;
+    umr_qp_attr_ex.cap.max_recv_wr     = 16;
+    umr_qp_attr_ex.cap.max_send_sge    = 1;
+    umr_qp_attr_ex.cap.max_recv_sge    = 1;
+    umr_qp_attr_ex.cap.max_inline_data = 0;
+    umr_qp_attr_ex.qp_type             = IBV_QPT_RC;
+    umr_qp_attr_ex.comp_mask          |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS | IBV_QP_INIT_ATTR_PD;
+    umr_qp_attr_ex.pd                  = md->super.pd;
+    ucs_info("pd %p", md->super.pd);
+    umr_qp_attr_ex.send_ops_flags     |= IBV_QP_EX_WITH_SEND;
+
+    //ucs_info("pd %p", md->super.pd);
+    md->umr_qp = mlx5dv_create_qp(ibdev->ibv_context, &umr_qp_attr_ex, &mlx5_qp_attr);
+    if (md->umr_qp == NULL) {
+        ucs_error("failed to create UMR QP (qp): %m");
+        goto err_destroy_cq;
+    }
+    ucs_info("created UMR QP (qp) on %s, QPN 0x%x", uct_ib_device_name(ibdev), md->umr_qp->qp_num);
+
+    md->umr_qpx = ibv_qp_to_qp_ex(md->umr_qp);
+    if (md->umr_qpx == NULL) {
+        ucs_error("failed to create UMR QP (qpx): %m");
+        goto err_destroy_qp;
+    }
+    ucs_info("created UMR QP (qpx) on %s", uct_ib_device_name(ibdev));
+
+    /* YQ: need to check if this is still true or not */
+    // Turning on the IBV_SEND_SIGNALED option, will cause the reported work
+    // comletion to be with MLX5DV_WC_UMR opcode.
+    // The option IBV_SEND_INLINE is required by the current API.
+    md->umr_qpx->wr_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED;
+
+    md->umr_dv_qp = mlx5dv_qp_ex_from_ibv_qp_ex(md->umr_qpx);
+    if (md->umr_dv_qp == NULL) {
+        ucs_error("failed to create UMR QP (dv_qp): %m");
+        goto err_destroy_qp;
+    }
+    ucs_info("created UMR QP (dv_qp) on %s", uct_ib_device_name(ibdev));
+
+    /* TODO: fix port selection. It looks like active port should be used */
+    port_num = ibdev->first_port;
+    port_attr = uct_ib_device_port_attr(ibdev, port_num);
+
+    memset(&qp_attr, 0, sizeof(qp_attr));
+
+    /* Modify QP to INIT state */
+    qp_attr.qp_state                 = IBV_QPS_INIT;
+    qp_attr.pkey_index               = 0;
+    qp_attr.port_num                 = port_num;
+    qp_attr.qp_access_flags          = UCT_IB_MEM_ACCESS_FLAGS;
+    ret = ibv_modify_qp(md->umr_qp, &qp_attr,
+                        IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
+    if (ret) {
+        ucs_error("Failed to modify UMR QP to INIT: %m");
+        goto err_destroy_qp;
+    }
+
+    /* Modify to RTR */
+    qp_attr.qp_state                 = IBV_QPS_RTR;
+    qp_attr.dest_qp_num              = md->umr_qp->qp_num;
+
+    memset(&qp_attr.ah_attr, 0, sizeof(qp_attr.ah_attr));
+    qp_attr.ah_attr.port_num         = port_num;
+    qp_attr.ah_attr.dlid             = port_attr->lid;
+    qp_attr.ah_attr.is_global        = 1;
+    if (uct_ib_device_query_gid(ibdev, port_num, UCT_IB_MD_DEFAULT_GID_INDEX,
+                                &qp_attr.ah_attr.grh.dgid) != UCS_OK) {
+        goto err_destroy_qp;
+    }
+
+    qp_attr.rq_psn                   = 0;
+    qp_attr.path_mtu                 = IBV_MTU_512;
+    qp_attr.min_rnr_timer            = 7;
+    qp_attr.max_dest_rd_atomic       = 1;
+    ret = ibv_modify_qp(md->umr_qp, &qp_attr,
+                        IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+                        IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
+    if (ret) {
+        ucs_error("Failed to modify UMR QP to RTR: %m");
+        goto err_destroy_qp;
+    }
+
+    /* Modify to RTS */
+    qp_attr.qp_state                 = IBV_QPS_RTS;
+    qp_attr.sq_psn                   = 0;
+    qp_attr.timeout                  = 7;
+    qp_attr.rnr_retry                = 7;
+    qp_attr.retry_cnt                = 7;
+    qp_attr.max_rd_atomic            = 1;
+    ret = ibv_modify_qp(md->umr_qp, &qp_attr,
+                        IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                        IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
+                        IBV_QP_MAX_QP_RD_ATOMIC);
+    if (ret) {
+        ucs_error("Failed to modify UMR QP to RTS: %m");
+        goto err_destroy_qp;
+    }
+
+    ucs_info("initialized UMR QP 0x%x", md->umr_qp->qp_num);
+    return UCS_OK;
+
+err_destroy_qp:
+    uct_ib_destroy_qp(md->umr_qp);
+err_destroy_cq:
+    ibv_destroy_cq(md->umr_cq);
+err:
+    return UCS_ERR_IO_ERROR;
+#else
+    return UCS_ERR_UNSUPPORTED;
+#endif
+}
+
+#if 0
+static ucs_status_t
+uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
+                         struct ibv_qp *qp, struct ibv_cq *cq, int sync)
+{
+    code_path();
+    uct_ib_mlx5_mem_t *ib_memh = ucs_derived_of(memh, uct_ib_mlx5_mem_t);
+    //struct ibv_wc wc           = {};
+    uct_ib_mlx5_umr_t *umr     = ib_memh->umr;
+    //struct ibv_send_wr *wr     = &umr->wr;
+    //struct ibv_send_wr *bad_wr;
+    //int ret;
+    struct mlx5dv_mkey *master_key_mkey;
+    struct mlx5dv_mkey_init_attr master_key_mkey_init_attr = {};
+
+    ucs_assert_always(sync); /* TODO: support nonblocking*/
+
+    //umr->under_dbg = 0;
+
+    /* create master key */
+    master_key_mkey_init_attr.pd = md->super.pd;
+    master_key_mkey_init_attr.create_flags = MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT;
+    master_key_mkey_init_attr.max_entries = umr->iov_count + 1;
+    master_key_mkey = mlx5dv_create_mkey(&master_key_mkey_init_attr);
+    /* YQ: need to call mlx5dv_destroy_mkey(&master_key_mkey) at tear-down */
+    if (master_key_mkey == NULL) {
+        ucs_error("failed to create UMR master mkey: %m");
+        return UCS_ERR_NO_MEMORY;
+    }
+    ucs_info("created UMR master mkey %p, lkey 0x%x", master_key_mkey, master_key_mkey->lkey);
+
+
+#if 0
+    /* Create indirect MR */
+    umr->memh.mr = _umr_mr_pool_get(md);
+    if (!umr->memh.mr) {
+        ucs_error("ibv_exp_create_mr() failed: %m");
+        return UCS_ERR_NO_MEMORY;
+    }
+    ucs_info("UMR reg: mr=%p, lkey=%d\n", umr->memh.mr, (int)umr->memh.mr->lkey);
+
+    /* YQ: Non-inline UMR Verbs is not supported by RDMA-Core */
+    umr->is_inline = 1;
+
+    wr->ext_op.umr.memory_objects = NULL;
+    wr->exp_send_flags           |= IBV_EXP_SEND_INLINE;
+    wr->exp_opcode                = IBV_EXP_WR_UMR_FILL;
+    wr->exp_send_flags           |= IBV_EXP_SEND_SIGNALED;
+    wr->ext_op.umr.exp_access     = UCT_IB_MEM_ACCESS_FLAGS;
+    wr->ext_op.umr.modified_mr    = umr->memh.mr;
+    wr->ext_op.umr.num_mrs        = umr->iov_count;
+    wr->ext_op.umr.base_addr      = umr->base_addr;
+
+    /* Post UMR */
+    ret = ibv_exp_post_send(qp, wr, &bad_wr);
+    if (ret) {
+        ucs_fatal("ibv_exp_post_send(UMR_FILL) failed: %m");
+    }
+    ucs_info("num_mrs %d, base_addr %p, inline %d, type %d",
+             wr->ext_op.umr.num_mrs,
+             (void*)(uintptr_t)wr->ext_op.umr.base_addr, umr->is_inline,
+             wr->ext_op.umr.umr_type);
+
+    /* Wait for send UMR completion */
+    for (;;) {
+        ret = ibv_poll_cq(cq, 1, &wc);
+        if (ret == 1) {
+            if (wc.status != IBV_WC_SUCCESS) {
+                ucs_fatal("UMR_FILL completed with error: %s vendor_err %d",
+                          ibv_wc_status_str(wc.status), wc.vendor_err);
+            }
+            break;
+        }
+        if (ret < 0) {
+            ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
+        }
+    }
+    ucs_info("UMR posted!!!");
+
+    /* TODO: check that not needed */
+    /* umr->mr->addr       = iov[0].buffer;
+       umr->mr->length     = length; */
+
+    uct_ib_memh_init_from_mr(&umr->memh.super, umr->memh.mr); /* init keys */
+    umr->memh.umr         = umr;
+    umr->memh.super.flags = UCT_IB_MEM_FLAG_NC_MR;
+    umr->memh.umr_depth   = umr->depth;
+//    umr->memh.mr->addr = umr->base_addr;
+
+    _dump_umr_mgmt(umr, "Reg");
+
+
+    if (wr->ext_op.umr.memory_objects != NULL) {
+        ucs_assert_always(!umr->is_inline);
+        ibv_exp_dealloc_mkey_list_memory(wr->ext_op.umr.memory_objects);
+    }
+
+    if (umr->repeat_count > 1) {
+        ucs_free(wr->ext_op.umr.mem_list.rb.mem_repeat_block_list);
+    } else {
+        ucs_assert(umr->repeat_count == 1);
+        ucs_free(wr->ext_op.umr.mem_list.mem_reg_list);
+    }
+
+    return UCS_OK;
+#endif
+    return UCS_OK;
+}
+#endif
+
+static ucs_status_t
+uct_ib_mlx5_umr_deregister(uct_ib_mem_t *memh, struct ibv_qp *qp, struct ibv_cq *cq)
+{
+#if 0
+    uct_ib_mlx5_mem_t *ib_memh = ucs_derived_of(memh, uct_ib_mlx5_mem_t);
+    uct_ib_mlx5_umr_t *umr     = ib_memh->umr;
+    struct ibv_exp_send_wr *wr = &umr->wr;
+    struct ibv_wc wc           = {};
+    struct ibv_exp_send_wr *bad_wr;
+    int ret;
+    char buf[256];
+    char *ptr;
+
+    //_dump_umr_mgmt(umr, "Dereg");
+
+    memset(wr, 0, sizeof(*wr));
+    wr->exp_opcode             = IBV_EXP_WR_UMR_INVALIDATE;
+    wr->exp_send_flags         = IBV_EXP_SEND_INLINE |
+                                 IBV_EXP_SEND_SIGNALED;
+    wr->ext_op.umr.modified_mr = umr->memh.mr;
+
+    //double start = GET_TS(), interval;
+    /* Post UMR */
+    ret = ibv_exp_post_send(qp, wr, &bad_wr);
+    if (ret) {
+        ucs_fatal("ibv_exp_post_send(UMR_INV) failed: %m");
+    }
+
+    //interval = GET_TS() - start;
+    //if((ptr = getenv("MY_UCX_DEBUG_NC_POST"))) {
+    //    interval += atof(ptr);
+    //}
+    //sprintf(buf, "%lf", interval);
+    //setenv("MY_UCX_DEBUG_NC_POST", buf, 1);
+
+    //start = GET_TS();
+    /* Wait for send UMR completion */
+    for (;;) {
+        ret = ibv_poll_cq(cq, 1, &wc);
+        if (ret == 1) {
+            if (wc.status != IBV_WC_SUCCESS) {
+                ucs_fatal("UMR_INV completed with error: %s vendor_err %d",
+                          ibv_wc_status_str(wc.status), wc.vendor_err);
+            }
+            break;
+        }
+        if (ret < 0) {
+            ucs_fatal("ibv_exp_poll_cq(umr_cq) failed: %m");
+        }
+    }
+
+    //interval = GET_TS() - start;
+    //if((ptr = getenv("MY_UCX_DEBUG_NC_WAIT"))) {
+    //    interval += atof(ptr);
+    //}
+    //sprintf(buf, "%lf", interval);
+    //setenv("MY_UCX_DEBUG_NC_WAIT", buf, 1);
+
+    //start = GET_TS();
+    _umr_mr_pool_put(umr->memh.mr);
+
+    //interval = GET_TS() - start;
+    //if((ptr = getenv("MY_UCX_DEBUG_NC_MR"))) {
+    //    interval += atof(ptr);
+    //}
+    //sprintf(buf, "%lf", interval);
+    //setenv("MY_UCX_DEBUG_NC_MR", buf, 1);
+
+    ucs_free(umr);
+
+    return UCS_OK;
+#endif
+    return UCS_OK;
+}
+
+static ucs_status_t
+uct_ib_mlx5_mem_reg_nc(uct_ib_md_t *ib_md, const uct_iov_t *iov, size_t iovcnt,
+                       size_t repeat_count, uct_mem_h *memh_p)
+{
+    code_path();
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    ucs_status_t status;
+    uct_ib_mem_t *memh;
+
+    if ((memh_p == NULL) || (repeat_count == 0) || (iovcnt == 0)) {
+        ucs_error("Invalid UMR parameters: memh_p %p, repeat_count %ld, iovcnt %ld",
+                  memh_p, repeat_count, iovcnt);
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    ucs_info("reg NC on MD(%p): %p, iovs %ld, repeat %ld",
+             md, iov[0].buffer, iovcnt, repeat_count);
+
+    status = uct_ib_mlx5_umr_alloc(md, iov, iovcnt, repeat_count, &memh);
+    if (ucs_unlikely(status != UCS_OK)) {
+        return status;
+    }
+
+#if 0
+    status = uct_ib_mlx5_umr_register(md, memh, md->umr_qp, md->umr_cq, 1);
+    if (ucs_unlikely(status != UCS_OK)) {
+        return status;
+    }
+#endif
+
+    *memh_p = memh;
+    return UCS_OK;
+}
+
+static ucs_status_t uct_ib_mlx5_mem_dereg_nc(uct_ib_md_t *ib_md, uct_mem_h memh)
+{
+    code_path();
+    uct_ib_mlx5_md_t *md  = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mem_t *ib_memh = (uct_ib_mem_t*)memh;
+    ucs_status_t status;
+
+    status = uct_ib_mlx5_umr_deregister(ib_memh, md->umr_qp, md->umr_cq);
+    if (status != UCS_OK) {
+        ucs_error("failed to deregister NC memory: %s",
+                  ucs_status_string(status));
+    }
+
+    ucs_info("UMR deregistered, md %p memh %p", ib_md, memh);
+
+    return status;
+}
+
 static ucs_status_t uct_ib_mlx5_add_page(ucs_mpool_t *mp, size_t *size_p, void **page_p)
 {
     uct_ib_mlx5_md_t *md = ucs_container_of(mp, uct_ib_mlx5_md_t, dbrec_pool);
@@ -533,6 +1326,7 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
                                              const uct_ib_md_config_t *md_config,
                                              uct_ib_md_t **p_md)
 {
+    code_path();
     char out[UCT_IB_MLX5DV_ST_SZ_BYTES(query_hca_cap_out)] = {};
     char in[UCT_IB_MLX5DV_ST_SZ_BYTES(query_hca_cap_in)]   = {};
     struct mlx5dv_context_attr dv_attr = {};
@@ -567,6 +1361,7 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
         }
         goto err;
     }
+    ucs_info("opened ibv_device %p, name %s", ibv_device, ibv_get_device_name(ibv_device));
 
     md = ucs_calloc(1, sizeof(*md), "ib_mlx5_md");
     if (md == NULL) {
@@ -711,6 +1506,11 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
         goto err_free_zero_buf;
     }
 
+    status = uct_ib_mlx5_umr_create_qp(md);
+    if (status != UCS_OK && status != UCS_ERR_UNSUPPORTED) {
+        goto err_free;
+    }
+
     dev->flags |= UCT_IB_DEVICE_FLAG_MLX5_PRM;
     md->flags |= UCT_IB_MLX5_MD_FLAG_DEVX;
     md->flags |= UCT_IB_MLX5_MD_FLAGS_DEVX_OBJS(md_config->devx_objs);
@@ -731,6 +1531,7 @@ err:
 
 void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
 {
+    code_path();
     uct_ib_mlx5_md_t *md = ucs_derived_of(ibmd, uct_ib_mlx5_md_t);
     ucs_status_t status;
 
@@ -740,6 +1541,14 @@ void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
     status = ucs_spinlock_destroy(&md->dbrec_lock);
     if (status != UCS_OK) {
         ucs_warn("ucs_spinlock_destroy() failed (%d)", status);
+    }
+
+    if (md->umr_qp != NULL) {
+        uct_ib_destroy_qp(md->umr_qp);
+    }
+
+    if (md->umr_cq != NULL) {
+        ibv_destroy_cq(md->umr_cq);
     }
 }
 
@@ -754,8 +1563,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .reg_multithreaded   = uct_ib_mlx5_devx_reg_multithreaded,
     .dereg_multithreaded = uct_ib_mlx5_devx_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
-    .reg_nc              = (uct_ib_md_mem_reg_nc_func_t)ucs_empty_function_return_success,
-    .dereg_nc            = (uct_ib_md_mem_dereg_nc_func_t)ucs_empty_function_return_success
+    .reg_nc              = uct_ib_mlx5_mem_reg_nc,
+    .dereg_nc            = uct_ib_mlx5_mem_dereg_nc
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_devx_md_ops, 2);
@@ -764,6 +1573,7 @@ UCT_IB_MD_OPS(uct_ib_mlx5_devx_md_ops, 2);
 
 static ucs_status_t uct_ib_mlx5dv_check_dc(uct_ib_device_t *dev)
 {
+    code_path();
     ucs_status_t status = UCS_OK;
 #if HAVE_DC_DV
     struct ibv_srq_init_attr srq_attr = {};
@@ -818,6 +1628,7 @@ static ucs_status_t uct_ib_mlx5dv_check_dc(uct_ib_device_t *dev)
         ucs_debug("failed to create DCT on %s: %m", uct_ib_device_name(dev));
         goto err_qp;
     }
+    ucs_info("created QP on %s, QPN 0x%x", uct_ib_device_name(dev), qp->qp_num);
 
     attr.qp_state        = IBV_QPS_INIT;
     attr.port_num        = 1;
@@ -876,6 +1687,7 @@ static ucs_status_t uct_ib_mlx5dv_md_open(struct ibv_device *ibv_device,
                                           const uct_ib_md_config_t *md_config,
                                           uct_ib_md_t **p_md)
 {
+    code_path();
     ucs_status_t status = UCS_OK;
     struct ibv_context *ctx;
     uct_ib_device_t *dev;

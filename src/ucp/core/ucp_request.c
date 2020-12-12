@@ -213,7 +213,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
     ucp_dt_reg_t *dt_reg;
     ucs_status_t status;
     uct_mem_h *nc_memh;
-    ucp_md_index_t md_idx;
+    //ucp_md_index_t md_idx;
     int flags;
     int level;
 
@@ -272,7 +272,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
             return UCS_OK;
         }
 
-        md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
+        //md_idx = ucp_ep_md_index(req_dbg->send.ep, lane);
 
         /* register contig memory block covering the whole struct */
         status = ucp_mem_rereg_mds(context, md_map,
@@ -287,7 +287,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
                       ucs_status_string(status));
             return status;
         }
-        ucs_info("registered contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %d",
+        ucs_info("registered contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %lu",
                  s, buffer, s->len, s->lb_displ, s->extent, state->dt.struct_dt.contig.memh[0],
                   s->rep_count, state->dt.struct_dt.contig.md_map);
 
@@ -313,7 +313,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         if (status != UCS_OK) {
             goto err;
         }
-        ucs_info("registered non_contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %d",
+        ucs_info("registered non_contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %lu",
                  s, buffer, s->len, s->lb_displ, s->extent, state->dt.struct_dt.non_contig.memh[0],
                   s->rep_count, state->dt.struct_dt.non_contig.md_map);
         UCS_STATS_UPDATE_COUNTER(s->stats, UCP_DT_STRUCT_STAT_CREATE, 1);

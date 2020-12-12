@@ -234,7 +234,11 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
             memh_index    = ucs_bitmap2idx(state->dt.struct_dt.non_contig.md_map,
                                            md_index);
             iov[0].memh   = state->dt.struct_dt.non_contig.memh[memh_index];
-            iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov,
+            /* YQ: the new UMR implementation changes the semantic so now the
+             *     base address starts from 0x0 instead of the actual VA
+             */
+            //iov[0].buffer = UCS_PTR_BYTE_OFFSET(src_iov,
+            iov[0].buffer = UCS_PTR_BYTE_OFFSET(0x0,
                                                 state->offset + s->lb_displ);
             iov[0].length = length_max;
             iov[0].stride = 0;
@@ -271,6 +275,7 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
         ucs_error("Invalid data type");
     }
 
+    /* YQ: why increasing offset here? */
     state->offset += length_it;
 }
 
@@ -279,6 +284,7 @@ ucs_status_t ucp_do_am_zcopy_single(uct_pending_req_t *self, uint8_t am_id,
                                     const void *hdr, size_t hdr_size,
                                     ucp_req_complete_func_t complete)
 {
+    code_path();
     ucp_request_t  *req    = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_ep_t *ep           = req->send.ep;
     size_t max_iov         = ucp_ep_config(ep)->am.max_iov;
@@ -292,6 +298,8 @@ ucs_status_t ucp_do_am_zcopy_single(uct_pending_req_t *self, uint8_t am_id,
     ucp_dt_iov_copy_uct(ep->worker->context,iov, &iovcnt, max_iov,
                         &state, req->send.buffer, req->send.datatype,
                         req->send.length, ucp_ep_md_index(ep, req->send.lane), NULL);
+    ucs_info("iov memh %p, buffer %p, len %ld, stride %ld, count %d",
+             iov[0].memh, iov[0].buffer, iov[0].length, iov[0].stride, iov[0].count);
 
     ucs_info("am_zcopy, dt %ld, length %ld, iovcnt %ld",
              req->send.datatype & UCP_DATATYPE_CLASS_MASK, req->send.length, iovcnt);

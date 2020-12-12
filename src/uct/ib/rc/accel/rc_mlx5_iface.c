@@ -266,6 +266,7 @@ ucs_status_t uct_rc_mlx5_iface_create_qp(uct_rc_mlx5_iface_common_t *iface,
         status = UCS_ERR_IO_ERROR;
         goto err;
     }
+    ucs_info("created QP on %s, QPN 0x%x", uct_ib_device_name(dev), qp->verbs.qp->qp_num);
 
     qp->qp_num = qp->verbs.qp->qp_num;
 #else

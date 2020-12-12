@@ -321,6 +321,7 @@ static ucs_status_t uct_dc_mlx5_iface_create_qp(uct_dc_mlx5_iface_t *iface,
                   UCT_IB_IFACE_ARG(ib_iface));
         return UCS_ERR_IO_ERROR;
     }
+    ucs_info("created QP on %s, QPN 0x%x", uct_ib_device_name(dev), qp->qp_num);
 
     dci->txwq.super.verbs.qp = qp;
     dci->txwq.super.qp_num = dci->txwq.super.verbs.qp->qp_num;
@@ -467,6 +468,7 @@ ucs_status_t uct_dc_mlx5_iface_create_dct(uct_dc_mlx5_iface_t *iface)
         ucs_error("mlx5dv_create_qp(DCT) failed: %m");
         return UCS_ERR_INVALID_PARAM;
     }
+    ucs_info("created QP on %s, QPN 0x%x", uct_ib_device_name(dev), iface->rx.dct.verbs.qp->qp_num);
 
     attr.pkey_index      = iface->super.super.super.pkey_index;
     attr.qp_state        = IBV_QPS_INIT;

@@ -173,6 +173,7 @@ static size_t _dte_pack( const ucp_dt_struct_t *s,
                          const void *inbuf, void *outbuf,
                          size_t out_offset_orig, size_t len)
 {
+    code_path();
     size_t out_offs = 0;
     size_t copy_len = 0;
 
@@ -224,6 +225,7 @@ static size_t _dte_unpack(const ucp_dt_struct_t *s,
                           const void *inbuf, void *outbuf,
                          size_t in_offset_orig, size_t len)
 {
+    code_path();
     size_t in_offset = 0;
     size_t copy_len = 0;
 
@@ -627,8 +629,8 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     printf("STRUCT reg: addr=%p, datatype=%p\n", buf, s);
 #endif
 
-    ucs_info("Register struct on md, dt 0x%x, len %ld", dt, s->len);
-
+    ucs_info("Register struct on md, dt %lu, len %ld", dt, s->len);
+    ucs_info("*memh before registration %p", *memh);
     status = _struct_register_rec(s, &val, buf);
     if (status == UCS_OK) {
         *md_map_p = UCS_BIT(md_idx);
@@ -636,8 +638,9 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
 
     }
     *memh = val.noncontig.memh[0];
+    ucs_info("*memh after registration %p", *memh);
     //if (*memh) (*md_map_p)++;
-    ucs_info("registered dt 0x%x length %zu on md[%d] memh[%d]=%p", dt, s->len, md_idx, 0, val.noncontig.memh[0]);
+    ucs_info("registered dt %lu length %ld on md[%d] memh[%d]=%p", dt, s->len, md_idx, 0, val.noncontig.memh[0]);
 
     return status;
 }

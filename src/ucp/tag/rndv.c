@@ -456,7 +456,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_get_zcopy, (self),
     const size_t max_iovcnt = 1;
     uct_iface_attr_t* attrs;
     ucs_status_t status;
-    size_t offset, length, ucp_mtu, remainder, align, chunk;
+    size_t offset, length, ucp_mtu, remainder, align, chunk, raddr;
     uct_iov_t iov[max_iovcnt];
     size_t iovcnt;
     ucp_rsc_index_t rsc_index;
@@ -549,9 +549,17 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_get_zcopy, (self),
                         rndv_req->send.mdesc);
 
     for (;;) {
+        if (UCP_DATATYPE_STRUCT == (rndv_req->send.datatype & UCP_DATATYPE_CLASS_MASK)) {
+            /* YQ: the new UMR implementation changes the semantic so now the
+             *     base address starts from 0x0 instead of the actual VA
+             */
+            raddr = 0x0;
+        } else {
+            raddr = rndv_req->send.rndv_get.remote_address;
+        }
         status = uct_ep_get_zcopy(ep->uct_eps[lane],
                                   iov, iovcnt,
-                                  rndv_req->send.rndv_get.remote_address + offset,
+                                  raddr + offset,
                                   uct_rkey,
                                   &rndv_req->send.state.uct_comp);
         ucp_request_send_state_advance(rndv_req, &state,
@@ -983,10 +991,11 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_am_bcopy, (self),
 UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
                  uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *sreq     = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_ep_h ep             = sreq->send.ep;
     ucs_status_t status;
-    size_t offset, ucp_mtu, align, remainder, length;
+    size_t offset, ucp_mtu, align, remainder, length, raddr;
     uct_iface_attr_t *attrs = ucp_worker_iface_get_attr(ep->worker,
                                 ucp_ep_get_rsc_index(ep, sreq->send.lane));
 #if 1
@@ -1024,13 +1033,23 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
                    sreq, offset, (uintptr_t)sreq->send.buffer % align,
                    UCS_PTR_BYTE_OFFSET(sreq->send.buffer, offset), length);
 
+    ucs_info("sd %d, rd %d", UCP_DT_IS_STRUCT(sreq->send.datatype), UCP_DT_IS_STRUCT(sreq->recv.datatype));
+    if (UCP_DATATYPE_STRUCT == (sreq->recv.datatype & UCP_DATATYPE_CLASS_MASK)) {
+        /* YQ: the new UMR implementation changes the semantic so now the
+         *     base address starts from 0x0 instead of the actual VA
+         */
+        raddr = 0x0;
+    } else {
+        raddr = sreq->send.rndv_put.remote_address;
+    }
+
     state = sreq->send.state.dt;
     ucp_dt_iov_copy_uct(ep->worker->context, iov, &iovcnt, max_iovcnt, &state,
                         sreq->send.buffer, sreq->send.datatype, length,
                         ucp_ep_md_index(ep, sreq->send.lane), sreq->send.mdesc);
     status = uct_ep_put_zcopy(ep->uct_eps[sreq->send.lane],
                               iov, iovcnt,
-                              sreq->send.rndv_put.remote_address + offset,
+                              raddr + offset,
                               sreq->send.rndv_put.uct_rkey,
                               &sreq->send.state.uct_comp);
     ucp_request_send_state_advance(sreq, &state,

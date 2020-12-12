@@ -278,6 +278,7 @@ uct_rc_mlx5_verbs_create_cmd_qp(uct_rc_mlx5_iface_common_t *iface)
         ucs_error("failed to create TM control QP: %m");
         goto err_rd;
     }
+    ucs_info("created QP on %s, QPN 0x%x", uct_ib_device_name(ibdev), qp->qp_num);
 
 
     /* Modify QP to INIT state */

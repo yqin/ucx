@@ -764,6 +764,7 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
                          /* AV   */ uct_ib_mlx5_base_av_t *av, struct mlx5_grh_av *grh_av,
                                     size_t av_size, uint8_t fm_ce_se, int max_log_sge)
 {
+    code_path();
     struct mlx5_wqe_ctrl_seg     *ctrl;
     struct mlx5_wqe_raddr_seg    *raddr;
     struct mlx5_wqe_data_seg     *dptr;
@@ -783,6 +784,7 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
 
     switch (opcode_flags) {
     case MLX5_OPCODE_SEND:
+        code_path();
         inl_seg_size     = ucs_align_up_pow2(sizeof(*inl) + sizeof(*rch) + am_hdr_len,
                                              UCT_IB_MLX5_WQE_SEG_SIZE);
 
@@ -808,6 +810,7 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
 #if IBV_HW_TM
     case MLX5_OPCODE_SEND|UCT_RC_MLX5_OPCODE_FLAG_TM:
     case MLX5_OPCODE_SEND_IMM|UCT_RC_MLX5_OPCODE_FLAG_TM:
+        code_path();
         inl_seg_size     = ucs_align_up_pow2(sizeof(*inl) + sizeof(struct ibv_tmh),
                                              UCT_IB_MLX5_WQE_SEG_SIZE);
         inl              = next_seg;
@@ -823,9 +826,11 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
 #endif
 
     case MLX5_OPCODE_RDMA_READ:
+        code_path();
         fm_ce_se |= MLX5_WQE_CTRL_CQ_UPDATE;
         /* Fall through */
     case MLX5_OPCODE_RDMA_WRITE:
+        code_path();
         /* Set RDMA segment */
         fm_ce_se |= uct_rc_ep_fm(&iface->super, &txwq->fi,
                                  (opcode_flags == MLX5_OPCODE_RDMA_READ) ?

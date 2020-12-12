@@ -709,10 +709,13 @@ ucs_status_t uct_ib_iface_create_qp(uct_ib_iface_t *iface,
     uct_ib_iface_fill_attr(iface, attr);
 
 #if HAVE_DECL_IBV_EXP_CREATE_QP
+    code_path();
     qp = ibv_exp_create_qp(dev->ibv_context, &attr->ibv);
 #elif HAVE_DECL_IBV_CREATE_QP_EX
+    code_path();
     qp = ibv_create_qp_ex(dev->ibv_context, &attr->ibv);
 #else
+    code_path();
     qp = ibv_create_qp(uct_ib_iface_md(iface)->pd, &attr->ibv);
 #endif
     if (qp == NULL) {
@@ -722,6 +725,7 @@ ucs_status_t uct_ib_iface_create_qp(uct_ib_iface_t *iface,
                   attr->cap.max_recv_wr, attr->cap.max_recv_sge, attr->max_inl_recv);
         return UCS_ERR_IO_ERROR;
     }
+    ucs_info("created QP on %s, QPN 0x%x", uct_ib_device_name(dev), qp->qp_num);
 
     attr->cap  = attr->ibv.cap;
     *qp_p      = qp;

@@ -279,6 +279,7 @@ ucs_status_t uct_rc_verbs_ep_am_zcopy(uct_ep_h tl_ep, uint8_t id, const void *he
                                       size_t iovcnt, unsigned flags,
                                       uct_completion_t *comp)
 {
+    code_path();
     uct_rc_verbs_iface_t     *iface = ucs_derived_of(tl_ep->iface, uct_rc_verbs_iface_t);
     uct_rc_verbs_ep_t        *ep    = ucs_derived_of(tl_ep, uct_rc_verbs_ep_t);
     uct_rc_iface_send_desc_t *desc  = NULL;

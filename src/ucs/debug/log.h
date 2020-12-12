@@ -46,6 +46,7 @@ BEGIN_C_DECLS
 #define ucs_trace_func(_fmt, ...)   ucs_log(UCS_LOG_LEVEL_TRACE_FUNC, "%s(" _fmt ")", __FUNCTION__, ## __VA_ARGS__)
 #define ucs_trace_poll(_fmt, ...)   ucs_log(UCS_LOG_LEVEL_TRACE_POLL, _fmt, ## __VA_ARGS__)
 
+#define code_path()                 ucs_info("!!!Code path: %s %d!!!", __func__, __LINE__)
 
 /**
  * Print a message regardless of current log level. Output can be

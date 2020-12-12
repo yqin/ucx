@@ -305,6 +305,11 @@ AS_IF([test "x$with_ib" = "xyes"],
                      [],
                      [[#include <infiniband/verbs.h>]])
 
+       AC_CHECK_DECLS(MLX5DV_QP_EX_WITH_MR_LIST,
+                      [AC_DEFINE([HAVE_DV_UMR], 1, [IB UMR support])],
+                      [],
+                      [[#include <infiniband/mlx5dv.h>]])
+
        # Extended atomics
        AS_IF([test "x$have_ext_atomics" != xno],
              [AC_DEFINE([HAVE_IB_EXT_ATOMICS], 1, [IB extended atomics support])],

@@ -642,6 +642,7 @@ uct_iface_invoke_am(uct_base_iface_t *iface, uint8_t id, void *data,
 static UCS_F_ALWAYS_INLINE
 void uct_invoke_completion(uct_completion_t *comp, ucs_status_t status)
 {
+    code_path();
     ucs_info("comp=%p, count=%d, status=%d func %p, %s", comp, comp->count, status,
               comp->func, ucs_debug_get_symbol_name((void*)comp->func));
     if (--comp->count == 0) {
