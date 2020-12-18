@@ -52,7 +52,6 @@ uct_rc_mlx5_ep_zcopy_post(uct_rc_mlx5_ep_t *ep,
                           /* TAG  */ uct_tag_t tag, uint32_t app_ctx, uint32_t ib_imm_be,
                           int force_sig, uct_completion_t *comp)
 {
-    code_path();
     uct_rc_mlx5_iface_common_t *iface  = ucs_derived_of(ep->super.super.super.iface,
                                                         uct_rc_mlx5_iface_common_t);
     uint16_t sn;
@@ -331,7 +330,6 @@ ucs_status_t uct_rc_mlx5_ep_am_zcopy(uct_ep_h tl_ep, uint8_t id, const void *hea
                                      size_t iovcnt, unsigned flags,
                                      uct_completion_t *comp)
 {
-    code_path();
     UCT_RC_MLX5_EP_DECL(tl_ep, iface, ep);
     ucs_status_t status;
 

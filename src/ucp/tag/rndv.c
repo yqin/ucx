@@ -18,6 +18,7 @@
 static int ucp_rndv_is_recv_pipeline_needed(ucp_request_t *rndv_req,
                                             ucs_memory_type_t mem_type)
 {
+    code_path();
     ucp_md_index_t md_index;
     uct_md_attr_t *md_attr;
 
@@ -42,6 +43,7 @@ static ucp_lane_index_t
 ucp_rndv_req_get_zcopy_rma_lane(ucp_request_t *rndv_req, ucp_lane_map_t ignore,
                                 uct_rkey_t *uct_rkey_p)
 {
+    code_path();
     ucp_ep_h ep                = rndv_req->send.ep;
     ucp_ep_config_t *ep_config = ucp_ep_config(ep);
 
@@ -53,6 +55,7 @@ ucp_rndv_req_get_zcopy_rma_lane(ucp_request_t *rndv_req, ucp_lane_map_t ignore,
 
 size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
 {
+    code_path();
     ucp_request_t *sreq              = arg;   /* send request */
     ucp_rndv_rts_hdr_t *rndv_rts_hdr = dest;
     ucp_ep_h ep                      = sreq->send.ep;
@@ -85,9 +88,16 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
         } else {
             /* YQ: here base address needs to be the lower bound instead of the
              *     actual buffer addr */
+#if HAVE_EXP_UMR
             ucp_dt_struct_t *s = ucp_dt_struct(sreq->send.datatype);
             rndv_rts_hdr->address = (uintptr_t)sreq->send.buffer + s->lb_displ;
-
+#else
+            /* YQ: need to use a zero-based address in RDMA-Core, also the
+             *     zero-based address should already reflect the lower bound
+             *     so no need to offset it
+             */
+            rndv_rts_hdr->address = (uintptr_t)0x0;
+#endif
             packed_rkey_size = ucp_rkey_pack_uct(worker->context,
                                                  sreq->send.state.dt.dt.struct_dt.non_contig.md_map,
                                                  sreq->send.state.dt.dt.struct_dt.non_contig.memh,
@@ -112,6 +122,7 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
 UCS_PROFILE_FUNC(ucs_status_t, ucp_proto_progress_rndv_rts, (self),
                  uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *sreq = ucs_container_of(self, ucp_request_t, send.uct);
     size_t packed_rkey_size;
 
@@ -123,9 +134,19 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_proto_progress_rndv_rts, (self),
 
 static size_t ucp_tag_rndv_rtr_pack(void *dest, void *arg)
 {
+    code_path();
     ucp_request_t *rndv_req          = arg;
     ucp_rndv_rtr_hdr_t *rndv_rtr_hdr = dest;
     ucp_request_t *rreq              = rndv_req->send.rndv_rtr.rreq;
+#if 0
+    /* YQ: receiver may not have a valid ep so this test may not be valid */
+    ucp_ep_h ep                      = rreq->send.ep;
+    ucp_worker_h worker              = ep->worker;
+    ucp_context_h context            = worker->context;
+    ucp_md_index_t md_index          = ucp_ep_md_index(ep, rreq->send.lane);
+    uct_md_attr_t md_attr            = context->tl_mds[md_index].attr;
+    uint64_t md_flags                = md_attr.cap.flags;
+#endif
     ssize_t packed_rkey_size;
 
     rndv_rtr_hdr->sreq_ptr = rndv_req->send.rndv_rtr.remote_request;
@@ -134,6 +155,10 @@ static size_t ucp_tag_rndv_rtr_pack(void *dest, void *arg)
     /* Pack remote keys (which can be empty list) */
     if (UCP_DT_IS_CONTIG(rreq->recv.datatype) ||
         UCP_DT_IS_STRUCT(rreq->recv.datatype)) {
+#if 0
+        (UCP_DT_IS_STRUCT(rreq->recv.datatype) &&
+         (md_flags & UCT_MD_FLAG_NEED_MEMH))) {
+#endif
         rndv_rtr_hdr->size    = rndv_req->send.rndv_rtr.length;
         rndv_rtr_hdr->offset  = rreq->recv.frag.offset;
 
@@ -147,9 +172,16 @@ static size_t ucp_tag_rndv_rtr_pack(void *dest, void *arg)
         } else {
             /* YQ: here base address needs to be the lower bound instead of the
              *     actual buffer addr */
+#if HAVE_EXP_UMR
             ucp_dt_struct_t *s = ucp_dt_struct(rreq->recv.datatype);
             rndv_rtr_hdr->address = (uintptr_t)rreq->recv.buffer + s->lb_displ;
-
+#else
+            /* YQ: need to use a zero-based address in RDMA-Core, also the
+             *     zero-based address should already reflect the lower bound
+             *     so no need to offset it
+             */
+            rndv_rtr_hdr->address = (uintptr_t)0x0;
+#endif
             packed_rkey_size = ucp_rkey_pack_uct(rndv_req->send.ep->worker->context,
                                                  rreq->recv.state.dt.struct_dt.non_contig.md_map,
                                                  rreq->recv.state.dt.struct_dt.non_contig.memh,
@@ -172,6 +204,7 @@ static size_t ucp_tag_rndv_rtr_pack(void *dest, void *arg)
 UCS_PROFILE_FUNC(ucs_status_t, ucp_proto_progress_rndv_rtr, (self),
                  uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *rndv_req = ucs_container_of(self, ucp_request_t, send.uct);
     size_t packed_rkey_size;
     ucs_status_t status;
@@ -190,6 +223,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_proto_progress_rndv_rtr, (self),
 
 ucs_status_t ucp_tag_rndv_reg_send_buffer(ucp_request_t *sreq)
 {
+    code_path();
     ucp_ep_h ep             = sreq->send.ep;
     ucp_worker_h worker     = ep->worker;
     ucp_context_h context   = worker->context;
@@ -225,6 +259,7 @@ ucs_status_t ucp_tag_rndv_reg_send_buffer(ucp_request_t *sreq)
 
 ucs_status_t ucp_tag_send_start_rndv(ucp_request_t *sreq)
 {
+    code_path();
     ucp_ep_h ep = sreq->send.ep;
     ucs_status_t status;
 
@@ -251,6 +286,7 @@ ucs_status_t ucp_tag_send_start_rndv(ucp_request_t *sreq)
 
 static void ucp_rndv_complete_send(ucp_request_t *sreq, ucs_status_t status)
 {
+    code_path();
     ucp_request_send_generic_dt_finish(sreq);
     ucp_request_send_buffer_dereg(sreq);
     ucp_request_complete_send(sreq, status);
@@ -259,6 +295,7 @@ static void ucp_rndv_complete_send(ucp_request_t *sreq, ucs_status_t status)
 static void ucp_rndv_req_send_ats(ucp_request_t *rndv_req, ucp_request_t *rreq,
                                   uintptr_t remote_request, ucs_status_t status)
 {
+    code_path();
     ucp_trace_req(rndv_req, "send ats remote_request 0x%lx", remote_request);
     UCS_PROFILE_REQUEST_EVENT(rreq, "send_ats", 0);
 
@@ -275,6 +312,7 @@ static void ucp_rndv_req_send_ats(ucp_request_t *rndv_req, ucp_request_t *rreq,
 UCS_PROFILE_FUNC_VOID(ucp_rndv_complete_rma_put_zcopy, (sreq),
                       ucp_request_t *sreq)
 {
+    code_path();
     ucp_trace_req(sreq, "rndv_put completed");
     UCS_PROFILE_REQUEST_EVENT(sreq, "complete_rndv_put", 0);
 
@@ -284,6 +322,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_complete_rma_put_zcopy, (sreq),
 
 static void ucp_rndv_send_atp(ucp_request_t *sreq, uintptr_t remote_request)
 {
+    code_path();
     ucs_assertv(sreq->send.state.dt.offset == sreq->send.length,
                 "sreq=%p offset=%zu length=%zu", sreq,
                 sreq->send.state.dt.offset, sreq->send.length);
@@ -307,6 +346,7 @@ static void ucp_rndv_send_atp(ucp_request_t *sreq, uintptr_t remote_request)
 UCS_PROFILE_FUNC_VOID(ucp_rndv_complete_frag_rma_put_zcopy, (fsreq),
                       ucp_request_t *fsreq)
 {
+    code_path();
     ucp_request_t *sreq = fsreq->send.proto.sreq;
 
     sreq->send.state.dt.offset += fsreq->send.length;
@@ -322,6 +362,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_complete_frag_rma_put_zcopy, (fsreq),
 
 static void ucp_rndv_send_frag_atp(ucp_request_t *fsreq, uintptr_t remote_request)
 {
+    code_path();
     ucp_trace_req(fsreq, "send frag atp remote_request 0x%lx", remote_request);
     UCS_PROFILE_REQUEST_EVENT(fsreq, "send_frag_atp", 0);
 
@@ -341,12 +382,14 @@ static void ucp_rndv_send_frag_atp(ucp_request_t *fsreq, uintptr_t remote_reques
 
 static void ucp_rndv_zcopy_recv_req_complete(ucp_request_t *req, ucs_status_t status)
 {
+    code_path();
     ucp_request_recv_buffer_dereg(req);
     ucp_request_complete_tag_recv(req, status);
 }
 
 static void ucp_rndv_complete_rma_get_zcopy(ucp_request_t *rndv_req)
 {
+    code_path();
     ucp_request_t *rreq = rndv_req->send.rndv_get.rreq;
 
     ucs_assertv(rndv_req->send.state.dt.offset == rndv_req->send.length,
@@ -366,6 +409,7 @@ static void ucp_rndv_complete_rma_get_zcopy(ucp_request_t *rndv_req)
 
 static void ucp_rndv_recv_data_init(ucp_request_t *rreq, size_t size)
 {
+    code_path();
     rreq->status             = UCS_OK;
     rreq->recv.tag.remaining = size;
     rreq->recv.frag.rreq     = NULL;
@@ -375,6 +419,7 @@ static void ucp_rndv_recv_data_init(ucp_request_t *rreq, size_t size)
 static void ucp_rndv_req_send_rtr(ucp_request_t *rndv_req, ucp_request_t *rreq,
                                   uintptr_t sender_reqptr, size_t recv_length)
 {
+    code_path();
     ucp_trace_req(rndv_req, "send rtr remote sreq 0x%lx rreq %p", sender_reqptr,
                   rreq);
 
@@ -389,6 +434,7 @@ static void ucp_rndv_req_send_rtr(ucp_request_t *rndv_req, ucp_request_t *rreq,
 
 static void ucp_rndv_get_lanes_count(ucp_request_t *rndv_req)
 {
+    code_path();
     ucp_ep_h ep        = rndv_req->send.ep;
     ucp_lane_map_t map = 0;
     uct_rkey_t uct_rkey;
@@ -410,6 +456,7 @@ static void ucp_rndv_get_lanes_count(ucp_request_t *rndv_req)
 
 static ucp_lane_index_t ucp_rndv_get_next_lane(ucp_request_t *rndv_req, uct_rkey_t *uct_rkey)
 {
+    code_path();
     /* get lane and mask it for next iteration.
      * next time this lane will not be selected & we continue
      * with another lane. After all lanes are masked - reset mask
@@ -450,13 +497,14 @@ static ucp_lane_index_t ucp_rndv_get_next_lane(ucp_request_t *rndv_req, uct_rkey
 UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_get_zcopy, (self),
                  uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *rndv_req = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_ep_h ep             = rndv_req->send.ep;
     ucp_ep_config_t *config = ucp_ep_config(ep);
     const size_t max_iovcnt = 1;
     uct_iface_attr_t* attrs;
     ucs_status_t status;
-    size_t offset, length, ucp_mtu, remainder, align, chunk, raddr;
+    size_t offset, length, ucp_mtu, remainder, align, chunk;
     uct_iov_t iov[max_iovcnt];
     size_t iovcnt;
     ucp_rsc_index_t rsc_index;
@@ -549,17 +597,9 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_get_zcopy, (self),
                         rndv_req->send.mdesc);
 
     for (;;) {
-        if (UCP_DATATYPE_STRUCT == (rndv_req->send.datatype & UCP_DATATYPE_CLASS_MASK)) {
-            /* YQ: the new UMR implementation changes the semantic so now the
-             *     base address starts from 0x0 instead of the actual VA
-             */
-            raddr = 0x0;
-        } else {
-            raddr = rndv_req->send.rndv_get.remote_address;
-        }
         status = uct_ep_get_zcopy(ep->uct_eps[lane],
                                   iov, iovcnt,
-                                  raddr + offset,
+                                  rndv_req->send.rndv_get.remote_address + offset,
                                   uct_rkey,
                                   &rndv_req->send.state.uct_comp);
         ucp_request_send_state_advance(rndv_req, &state,
@@ -595,6 +635,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_get_zcopy, (self),
 UCS_PROFILE_FUNC_VOID(ucp_rndv_get_completion, (self, status),
                       uct_completion_t *self, ucs_status_t status)
 {
+    code_path();
     ucp_request_t *rndv_req = ucs_container_of(self, ucp_request_t,
                                                send.state.uct_comp);
 
@@ -605,6 +646,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_get_completion, (self, status),
 
 static void ucp_rndv_put_completion(uct_completion_t *self, ucs_status_t status)
 {
+    code_path();
     ucp_request_t *sreq = ucs_container_of(self, ucp_request_t,
                                            send.state.uct_comp);
 
@@ -616,6 +658,7 @@ static void ucp_rndv_put_completion(uct_completion_t *self, ucs_status_t status)
 static void ucp_rndv_req_send_rma_get(ucp_request_t *rndv_req, ucp_request_t *rreq,
                                       const ucp_rndv_rts_hdr_t *rndv_rts_hdr)
 {
+    code_path();
     ucs_status_t status;
 
     ucp_trace_req(rndv_req, "start rma_get rreq %p", rreq);
@@ -649,6 +692,7 @@ static void ucp_rndv_send_frag_rtr(ucp_worker_h worker, ucp_request_t *rndv_req,
                                    ucp_request_t *rreq,
                                    const ucp_rndv_rts_hdr_t *rndv_rts_hdr)
 {
+    code_path();
     size_t max_frag_size = worker->context->config.ext.rndv_frag_size;
     int i, num_frags;
     size_t frag_size;
@@ -717,6 +761,7 @@ static UCS_F_ALWAYS_INLINE int
 ucp_rndv_is_rkey_ptr(const ucp_rndv_rts_hdr_t *rndv_rts_hdr, ucp_ep_h ep,
                      ucs_memory_type_t recv_mem_type, ucp_rndv_mode_t rndv_mode)
 {
+    code_path();
     const ucp_ep_config_t *ep_config = ucp_ep_config(ep);
 
     return /* must have remote address */
@@ -733,6 +778,7 @@ ucp_rndv_is_rkey_ptr(const ucp_rndv_rts_hdr_t *rndv_rts_hdr, ucp_ep_h ep,
 static void ucp_rndv_do_rkey_ptr(ucp_request_t *rndv_req, ucp_request_t *rreq,
                                  const ucp_rndv_rts_hdr_t *rndv_rts_hdr)
 {
+    code_path();
     ucp_ep_h ep                      = rndv_req->send.ep;
     const ucp_ep_config_t *ep_config = ucp_ep_config(ep);
     ucp_md_index_t dst_md_index;
@@ -788,6 +834,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_matched, (worker, rreq, rndv_rts_hdr),
                       ucp_worker_h worker, ucp_request_t *rreq,
                       const ucp_rndv_rts_hdr_t *rndv_rts_hdr)
 {
+    code_path();
     ucp_rndv_mode_t rndv_mode;
     ucp_request_t *rndv_req;
     ucp_ep_h ep;
@@ -851,7 +898,12 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_matched, (worker, rreq, rndv_rts_hdr),
     if (UCP_DT_IS_CONTIG(rreq->recv.datatype) || 
         (UCP_DT_IS_STRUCT(rreq->recv.datatype) &&
          (md_flags & UCT_MD_FLAG_NEED_MEMH))) {
+#if HAVE_EXP_UMR
         if ((rndv_rts_hdr->address != 0) &&
+#else
+        /* YQ: need to use a zero-based address in RDMA-Core */
+        if (
+#endif
             (ucp_rndv_is_get_zcopy(rreq->recv.mem_type, rndv_mode)) &&
             /* is it allowed to use GET Zcopy for the current message? */
             (rndv_rts_hdr->size >= ucp_ep_config(ep)->tag.rndv.min_get_zcopy) &&
@@ -892,6 +944,7 @@ out:
 ucs_status_t ucp_rndv_process_rts(void *arg, void *data, size_t length,
                                   unsigned tl_flags)
 {
+    code_path();
     ucp_worker_h worker                = arg;
     ucp_rndv_rts_hdr_t *rndv_rts_hdr   = data;
     ucp_recv_desc_t *rdesc;
@@ -924,6 +977,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rts_handler,
                  (arg, data, length, tl_flags),
                  void *arg, void *data, size_t length, unsigned tl_flags)
 {
+    code_path();
     return ucp_rndv_process_rts(arg, data, length, tl_flags);
 }
 
@@ -931,6 +985,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_ats_handler,
                  (arg, data, length, flags),
                  void *arg, void *data, size_t length, unsigned flags)
 {
+    code_path();
     ucp_reply_hdr_t *rep_hdr = data;
     ucp_request_t *sreq = (ucp_request_t*) rep_hdr->reqptr;
 
@@ -945,6 +1000,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_ats_handler,
 
 static size_t ucp_rndv_pack_data(void *dest, void *arg)
 {
+    code_path();
     ucp_rndv_data_hdr_t *hdr = dest;
     ucp_request_t *sreq = arg;
     size_t length, offset;
@@ -963,6 +1019,7 @@ static size_t ucp_rndv_pack_data(void *dest, void *arg)
 UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_am_bcopy, (self),
                  uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *sreq = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_ep_t *ep = sreq->send.ep;
     ucs_status_t status;
@@ -995,7 +1052,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
     ucp_request_t *sreq     = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_ep_h ep             = sreq->send.ep;
     ucs_status_t status;
-    size_t offset, ucp_mtu, align, remainder, length, raddr;
+    size_t offset, ucp_mtu, align, remainder, length;
     uct_iface_attr_t *attrs = ucp_worker_iface_get_attr(ep->worker,
                                 ucp_ep_get_rsc_index(ep, sreq->send.lane));
 #if 1
@@ -1011,6 +1068,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
     size_t iovcnt;
     ucp_dt_state_t state;
 
+    ucs_info("%p", sreq->send.mdesc);
     if (!sreq->send.mdesc) {
         status = ucp_request_send_buffer_reg_lane(sreq, sreq->send.lane, 0);
         ucs_assert_always(status == UCS_OK);
@@ -1033,23 +1091,13 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
                    sreq, offset, (uintptr_t)sreq->send.buffer % align,
                    UCS_PTR_BYTE_OFFSET(sreq->send.buffer, offset), length);
 
-    ucs_info("sd %d, rd %d", UCP_DT_IS_STRUCT(sreq->send.datatype), UCP_DT_IS_STRUCT(sreq->recv.datatype));
-    if (UCP_DATATYPE_STRUCT == (sreq->recv.datatype & UCP_DATATYPE_CLASS_MASK)) {
-        /* YQ: the new UMR implementation changes the semantic so now the
-         *     base address starts from 0x0 instead of the actual VA
-         */
-        raddr = 0x0;
-    } else {
-        raddr = sreq->send.rndv_put.remote_address;
-    }
-
     state = sreq->send.state.dt;
     ucp_dt_iov_copy_uct(ep->worker->context, iov, &iovcnt, max_iovcnt, &state,
                         sreq->send.buffer, sreq->send.datatype, length,
                         ucp_ep_md_index(ep, sreq->send.lane), sreq->send.mdesc);
     status = uct_ep_put_zcopy(ep->uct_eps[sreq->send.lane],
                               iov, iovcnt,
-                              raddr + offset,
+                              sreq->send.rndv_put.remote_address + offset,
                               sreq->send.rndv_put.uct_rkey,
                               &sreq->send.state.uct_comp);
     ucp_request_send_state_advance(sreq, &state,
@@ -1070,6 +1118,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
 static void ucp_rndv_am_zcopy_send_req_complete(ucp_request_t *req,
                                                 ucs_status_t status)
 {
+    code_path();
     ucs_assert(req->send.state.uct_comp.count == 0);
     ucp_request_send_buffer_dereg(req);
     ucp_request_complete_send(req, status);
@@ -1078,6 +1127,7 @@ static void ucp_rndv_am_zcopy_send_req_complete(ucp_request_t *req,
 static void ucp_rndv_am_zcopy_completion(uct_completion_t *self,
                                          ucs_status_t status)
 {
+    code_path();
     ucp_request_t *sreq = ucs_container_of(self, ucp_request_t,
                                            send.state.uct_comp);
     if (sreq->send.state.dt.offset == sreq->send.length) {
@@ -1089,6 +1139,7 @@ static void ucp_rndv_am_zcopy_completion(uct_completion_t *self,
 
 static ucs_status_t ucp_rndv_progress_am_zcopy_single(uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *sreq = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_rndv_data_hdr_t hdr;
 
@@ -1100,6 +1151,7 @@ static ucs_status_t ucp_rndv_progress_am_zcopy_single(uct_pending_req_t *self)
 
 static ucs_status_t ucp_rndv_progress_am_zcopy_multi(uct_pending_req_t *self)
 {
+    code_path();
     ucp_request_t *sreq = ucs_container_of(self, ucp_request_t, send.uct);
     ucp_rndv_data_hdr_t hdr;
 
@@ -1116,6 +1168,7 @@ static ucs_status_t ucp_rndv_progress_am_zcopy_multi(uct_pending_req_t *self)
 UCS_PROFILE_FUNC_VOID(ucp_rndv_frag_send_put_completion, (self, status),
                       uct_completion_t *self, ucs_status_t status)
 {
+    code_path();
     ucp_request_t *freq = ucs_container_of(self, ucp_request_t, send.state.uct_comp);
     ucp_request_t *req  = freq->send.rndv_put.sreq;
 
@@ -1138,6 +1191,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_frag_send_put_completion, (self, status),
 UCS_PROFILE_FUNC_VOID(ucp_rndv_frag_recv_put_completion, (self, status),
                       uct_completion_t *self, ucs_status_t status)
 {
+    code_path();
     ucp_request_t *freq = ucs_container_of(self, ucp_request_t, send.state.uct_comp);
     ucp_request_t *req  = freq->send.rndv_put.sreq;
 
@@ -1159,6 +1213,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_frag_recv_put_completion, (self, status),
 UCS_PROFILE_FUNC_VOID(ucp_rndv_frag_get_completion, (self, status),
                       uct_completion_t *self, ucs_status_t status)
 {
+    code_path();
     ucp_request_t *freq  = ucs_container_of(self, ucp_request_t, send.state.uct_comp);
     ucp_request_t *fsreq = freq->send.rndv_get.rreq;
 
@@ -1180,6 +1235,7 @@ UCS_PROFILE_FUNC_VOID(ucp_rndv_frag_get_completion, (self, status),
 
 static ucs_status_t ucp_rndv_pipeline(ucp_request_t *sreq, ucp_rndv_rtr_hdr_t *rndv_rtr_hdr)
 {
+    code_path();
     ucp_worker_h worker   = sreq->send.ep->worker;
     ucp_context_h context = worker->context;
     const uct_md_attr_t *md_attr;
@@ -1313,6 +1369,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_atp_handler,
                  (arg, data, length, flags),
                  void *arg, void *data, size_t length, unsigned flags)
 {
+    code_path();
     ucp_reply_hdr_t *rep_hdr = data;
     ucp_request_t *req       = (ucp_request_t*) rep_hdr->reqptr;
     ucp_request_t *rreq;
@@ -1373,6 +1430,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
                  (arg, data, length, flags),
                  void *arg, void *data, size_t length, unsigned flags)
 {
+    code_path();
     ucp_rndv_rtr_hdr_t *rndv_rtr_hdr = data;
     ucp_request_t *sreq              = (ucp_request_t*)rndv_rtr_hdr->sreq_ptr;
     ucp_ep_h ep                      = sreq->send.ep;
@@ -1394,11 +1452,17 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
         ucp_tag_offload_cancel_rndv(sreq);
     }
 
-
+#if HAVE_EXP_UMR
     if ((UCP_DT_IS_CONTIG(sreq->send.datatype) ||
          (UCP_DT_IS_STRUCT(sreq->send.datatype) &&
           (md_flags & UCT_MD_FLAG_NEED_MEMH))) &&
         rndv_rtr_hdr->address) {
+#else
+    /* YQ: need to use a zero-based address in RDMA-Core */
+    if ((UCP_DT_IS_CONTIG(sreq->send.datatype) ||
+         (UCP_DT_IS_STRUCT(sreq->send.datatype) &&
+          (md_flags & UCT_MD_FLAG_NEED_MEMH)))) {
+#endif
         status = ucp_ep_rkey_unpack(ep, rndv_rtr_hdr + 1,
                                     &sreq->send.rndv_put.rkey);
         if (status != UCS_OK) {
@@ -1410,6 +1474,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
                              (sreq->send.length != rndv_rtr_hdr->size)) &&
                             (context->config.ext.rndv_mode != UCP_RNDV_MODE_PUT_ZCOPY));
 
+        /* YQ: rndv_put.uct_rkey comes from here */
+        ucs_info("raddr %p, rkey 0x%lx", (void*)sreq->send.rndv_put.remote_address, sreq->send.rndv_put.uct_rkey);
         sreq->send.lane = ucp_rkey_find_rma_lane(ep->worker->context, ep_config,
                                                  (is_pipeline_rndv ?
                                                   sreq->send.rndv_put.rkey->mem_type :
@@ -1417,6 +1483,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
                                                  ep_config->tag.rndv.put_zcopy_lanes,
                                                  sreq->send.rndv_put.rkey, 0,
                                                  &sreq->send.rndv_put.uct_rkey);
+        ucs_info("raddr %p, rkey 0x%lx", (void*)sreq->send.rndv_put.remote_address, sreq->send.rndv_put.uct_rkey);
         if (sreq->send.lane != UCP_NULL_LANE) {
             /*
              * Try pipeline protocol for non-host memory, if PUT_ZCOPY protocol is
@@ -1441,7 +1508,9 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
                                              UCP_REQUEST_SEND_PROTO_RNDV_PUT);
                 sreq->send.uct.func                = ucp_rndv_progress_rma_put_zcopy;
                 sreq->send.rndv_put.remote_request = rndv_rtr_hdr->rreq_ptr;
+                /* YQ: rndv_put.remote_address comes from here */
                 sreq->send.rndv_put.remote_address = rndv_rtr_hdr->address;
+                ucs_info("raddr %p, rkey 0x%lx", (void*)sreq->send.rndv_put.remote_address, sreq->send.rndv_put.uct_rkey);
                 sreq->send.mdesc                   = NULL;
                 goto out_send;
             } else {
@@ -1489,6 +1558,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_data_handler,
                  (arg, data, length, flags),
                  void *arg, void *data, size_t length, unsigned flags)
 {
+    code_path();
     ucp_rndv_data_hdr_t *rndv_data_hdr = data;
     ucp_request_t *rreq = (ucp_request_t*) rndv_data_hdr->rreq_ptr;
     size_t recv_len;
@@ -1503,6 +1573,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_data_handler,
 
 static void ucp_rndv_dump_rkey(const void *packed_rkey, char *buffer, size_t max)
 {
+    code_path();
     char *p    = buffer;
     char *endp = buffer + max;
 
@@ -1516,7 +1587,7 @@ static void ucp_rndv_dump(ucp_worker_h worker, uct_am_trace_type_t type,
                           uint8_t id, const void *data, size_t length,
                           char *buffer, size_t max)
 {
-
+    code_path();
     const ucp_rndv_rts_hdr_t *rndv_rts_hdr = data;
     const ucp_rndv_rtr_hdr_t *rndv_rtr_hdr = data;
     const ucp_rndv_data_hdr_t *rndv_data = data;
