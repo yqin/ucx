@@ -191,7 +191,8 @@ static void ucp_request_dt_dereg(ucp_context_t *context, ucp_dt_reg_t *dt_reg,
 {
     size_t i;
 
-    /* YQ: need to deregister NC buffers here? */
+    code_path();
+    /* YQ: no need to deregister NC buffer here since it's cached */
     for (i = 0; i < count; ++i) {
         ucp_trace_req(req_dbg, "mem dereg buffer %ld/%ld md_map 0x%"PRIx64,
                       i, count, dt_reg[i].md_map);
@@ -214,7 +215,6 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
     ucp_dt_reg_t *dt_reg;
     ucs_status_t status;
     uct_mem_h *nc_memh;
-    //ucp_md_index_t md_idx;
     int flags;
     int level;
 
@@ -262,13 +262,25 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         state->dt.iov.dt_reg = dt_reg;
         break;
     case UCP_DATATYPE_STRUCT:
-        s       = ucp_dt_struct(datatype);
-        nc_memh = ucp_dt_struct_in_cache(s, buffer);
-        if (ucs_likely(nc_memh != NULL)) {
+        ucs_assert(ucs_popcount(md_map) <= UCP_MAX_OP_MDS);
+        s = ucp_dt_struct(datatype);
+        ucp_dt_struct_hash_value_t val;
+        ucp_md_index_t md_idx, memh_idx;
+
+        /* retrieve from cache */
+        ucs_status_t ret = ucp_dt_struct_from_cache(s, buffer, &val);
+        if (UCS_OK == ret) {
             ucs_info("register dt struct %p buf %p, found in cache, memh %p",
                      s, buffer, nc_memh);
             /* SET memh properly */
-            state->dt.struct_dt.non_contig.memh[0] = nc_memh;
+            state->dt.struct_dt.contig.md_map     = val.contig.md_map;
+            state->dt.struct_dt.non_contig.md_map = val.noncontig.md_map;
+            memh_idx = 0;
+            ucs_for_each_bit(md_idx, val.noncontig.md_map) {
+                state->dt.struct_dt.contig.memh[memh_idx]     = val.contig.memh[memh_idx];
+                state->dt.struct_dt.non_contig.memh[memh_idx] = val.noncontig.memh[memh_idx];
+                memh_idx++;
+            }
             UCS_STATS_UPDATE_COUNTER(s->stats, UCP_DT_STRUCT_STAT_IN_CACHE, 1);
             return UCS_OK;
         }
@@ -314,6 +326,21 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_request_memory_reg,
         if (status != UCS_OK) {
             goto err;
         }
+
+        /* add to cache */
+        val.ucp_ctx = context;
+        /* val.md_idx is invalid for caching purpose - no use */
+        val.md_idx = 0;
+        val.contig.md_map    = state->dt.struct_dt.contig.md_map;
+        val.noncontig.md_map = state->dt.struct_dt.non_contig.md_map;
+        memh_idx = 0;
+        ucs_for_each_bit(md_idx, val.noncontig.md_map) {
+            val.contig.memh[memh_idx]    = state->dt.struct_dt.contig.memh[memh_idx];
+            val.noncontig.memh[memh_idx] = state->dt.struct_dt.non_contig.memh[memh_idx];
+            memh_idx++;
+        }
+        ucp_dt_struct_to_cache(s, buffer, &val);
+
         ucs_info("registered non_contig memh for struct %p, buf %p, len %ld, displ %ld, ext %ld, memh %p, repcnt %ld, md_map %lu",
                  s, buffer, s->len, s->lb_displ, s->extent, state->dt.struct_dt.non_contig.memh[0],
                   s->rep_count, state->dt.struct_dt.non_contig.md_map);
@@ -356,7 +383,9 @@ UCS_PROFILE_FUNC_VOID(ucp_request_memory_dereg, (context, datatype, state, req_d
         }
         break;
     case UCP_DATATYPE_STRUCT:
-        ucp_request_dt_dereg(context, &state->dt.struct_dt.contig, 1, req_dbg);
+        code_path();
+        /* YQ: dt is cached, so do not dereg here but from ucp_dt_destroy_struct() */
+        //ucp_request_dt_dereg(context, &state->dt.struct_dt.contig, 1, req_dbg);
         break;
     default:
         break;

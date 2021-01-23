@@ -356,6 +356,7 @@ void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
 {
     ucp_dt_struct_t *dt = ucp_dt_struct(datatype_p);
     ucp_dt_struct_hash_value_t val;
+    ucp_md_index_t md_idx, memh_idx = 0;
     ucs_status_t status;
 
     ucs_info("Destroy struct dt %p, len %ld (step %ld), depth %ld, uct_iovs %ld",
@@ -363,13 +364,17 @@ void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
 
     double start, nc_dereg = 0, mem_dereg = 0;
     int count = 0;
+
     kh_foreach_value(&dt->hash, val, {
-        uct_md_h md = val.ucp_ctx->tl_mds[val.md_idx].md;
-        ucs_info("struct dt %p, dereg NC memh %p on md %p",
-                 dt, val.noncontig.memh, md);
-        start = GET_TS();
-        uct_md_mem_dereg_nc(md, val.noncontig.memh[0]);
-        nc_dereg += GET_TS() - start;
+        ucs_for_each_bit(md_idx, val.noncontig.md_map) {
+            uct_md_h md = val.ucp_ctx->tl_mds[md_idx].md;
+            ucs_info("deregister dt %p on md[%d] memh[%d]=%p",
+                     dt, md_idx, memh_idx, val.noncontig.memh[memh_idx]);
+            start = GET_TS();
+            uct_md_mem_dereg_nc(md, val.noncontig.memh[memh_idx]);
+            nc_dereg += GET_TS() - start;
+            memh_idx++;
+        }
         start = GET_TS();
         status = ucp_mem_rereg_mds(val.ucp_ctx, 0, NULL, 0, 0, NULL,
                                    UCS_MEMORY_TYPE_HOST, NULL,
@@ -378,6 +383,7 @@ void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
         assert(UCS_OK == status);
         count++;
     })
+
     kh_destroy_inplace(dt_struct, &dt->hash);
     ucs_free(dt->desc);
     UCS_STATS_NODE_FREE(dt->stats);
@@ -425,22 +431,47 @@ size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt,
 }
 
 /* Dealing with UCT */
+ucs_status_t ucp_dt_struct_from_cache(ucp_dt_struct_t *s, void *ptr,
+                                      ucp_dt_struct_hash_value_t *val)
+{
+    khiter_t k;
+    ucp_dt_struct_hash_value_t tmp_val;
+    ucp_md_index_t md_idx, memh_idx = 0;
 
-inline static void _to_cache(ucp_dt_struct_t *s, void *ptr,
-                             ucp_dt_struct_hash_value_t *val)
+    k = kh_get(dt_struct, &s->hash, (uint64_t)ptr);
+
+    if (k == kh_end(&s->hash))
+        return UCS_ERR_NO_ELEM;
+
+    tmp_val = kh_value(&s->hash, k);
+    val->contig.md_map    = tmp_val.contig.md_map;
+    val->noncontig.md_map = tmp_val.noncontig.md_map;
+    ucs_for_each_bit(md_idx, val->noncontig.md_map) {
+        val->contig.memh[memh_idx]    = tmp_val.contig.memh[memh_idx];
+        val->noncontig.memh[memh_idx] = tmp_val.noncontig.memh[memh_idx];
+        memh_idx++;
+    }
+
+    ucs_info("dt %p retrieved from cache (buf %p)", s, ptr);
+
+    return UCS_OK;
+}
+
+void ucp_dt_struct_to_cache(ucp_dt_struct_t *s, void *ptr,
+                            ucp_dt_struct_hash_value_t *val)
 {
     uct_md_h md = val->ucp_ctx->tl_mds[val->md_idx].md;
     khiter_t k;
     int ret;
 
     k = kh_put(dt_struct, &s->hash, (uint64_t)ptr, &ret);
-    ucs_assert_always((ret == 1) || (ret == 2));
-    /* TODO: check ret */
+    /* TODO: check ret - why do we need this test? what exactly does it do? */
+    //ucs_assert_always((ret == 1) || (ret == 2));
     kh_value(&s->hash, k) = *val;
 
-    ucs_info("dt %p adding to cache (buf %p md %p memh %p)", s, ptr, md,
-             val->noncontig.memh);
+    ucs_info("dt %p adding to cache (buf %p, md %p, contig.md_map %d, contig.memh %p, non_contig.md_map %d, non_contig.memh %p)", s, ptr, md, val->contig.md_map, val->contig.memh, val->noncontig.md_map, val->noncontig.memh);
 }
+
 
 #if 0
 static uct_iov_t* _fill_uct_iov_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
@@ -558,8 +589,8 @@ static uct_iov_t* _fill_md_uct_iov_rec(ucp_dt_struct_t *s,
                 iov->buffer = eptr;
                 iov->length = s_in->len;
                 iov->stride = s->desc[i].extent;
-                status = ucp_dt_struct_register(val->ucp_ctx, val->md_idx, ptr,
-                                                s->desc[i].dt, &iov->memh,
+                status = ucp_dt_struct_register(val->ucp_ctx, val->md_idx, 0, ptr,
+                                                s->desc[i].dt, iov->memh,
                                                 &md_map);
                 ucs_assert_always(status == UCS_OK);
             }
@@ -601,6 +632,7 @@ ucs_status_t _struct_register_rec(ucp_dt_struct_t *s,
 
 ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
                                     ucp_md_index_t md_idx,
+                                    ucp_md_index_t memh_idx,
                                     void *buf, ucp_datatype_t dt,
                                     uct_mem_h* memh,
                                     ucp_md_map_t *md_map_p)
@@ -617,6 +649,7 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     val.ucp_ctx = context;
     val.md_idx = md_idx;
     val.contig.md_map = 0;
+    val.noncontig.md_map = 0;
     status = ucp_mem_rereg_mds(val.ucp_ctx, UCS_BIT(val.md_idx),
                                buf + s->lb_displ,
                                s->extent,
@@ -630,17 +663,12 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
 #endif
 
     ucs_info("Register struct on md, dt %lu, len %ld", dt, s->len);
-    ucs_info("*memh before registration %p", *memh);
+    ucs_info("memh before registration %p", memh[memh_idx]);
     status = _struct_register_rec(s, &val, buf);
-    if (status == UCS_OK) {
-        *md_map_p = UCS_BIT(md_idx);
-        _to_cache(s, buf, &val);
-
-    }
-    *memh = val.noncontig.memh[0];
-    ucs_info("*memh after registration %p", *memh);
+    memh[memh_idx] = val.noncontig.memh[0];
+    ucs_info("memh after registration %p", memh[memh_idx]);
     //if (*memh) (*md_map_p)++;
-    ucs_info("registered dt %lu length %ld on md[%d] memh[%d]=%p", dt, s->len, md_idx, 0, val.noncontig.memh[0]);
+    ucs_info("registered dt %p length %ld on md[%d] memh[%d]=%p", dt, s->len, md_idx, memh_idx, memh[memh_idx]);
 
     return status;
 }
@@ -654,10 +682,9 @@ ucs_status_t ucp_dt_struct_register_mds(ucp_context_t *context,
                                         uct_mem_h *uct_memh,
                                         ucp_md_map_t *md_map_p)
 {
-    unsigned memh_index;
     ucp_md_map_t new_md_map;
     const uct_md_attr_t *md_attr;
-    unsigned md_index;
+    ucp_md_index_t md_index, memh_index;
     ucs_status_t status;
     ucs_log_level_t level;
 
@@ -674,9 +701,9 @@ ucs_status_t ucp_dt_struct_register_mds(ucp_context_t *context,
             if (!(md_attr->cap.reg_mem_types & UCS_BIT(mem_type))) {
                 status = UCS_ERR_UNSUPPORTED;
             } else {
-                status = ucp_dt_struct_register(context, md_index, buffer,
-                                                datatype,
-                                                &uct_memh[memh_index],
+                status = ucp_dt_struct_register(context, md_index, memh_index,
+                                                buffer, datatype,
+                                                uct_memh,
                                                 md_map_p);
             }
 

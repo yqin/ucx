@@ -86,9 +86,9 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
                                                  sreq->send.mem_type,
                                                  rndv_rts_hdr + 1);
         } else {
+#if HAVE_EXP_UMR
             /* YQ: here base address needs to be the lower bound instead of the
              *     actual buffer addr */
-#if HAVE_EXP_UMR
             ucp_dt_struct_t *s = ucp_dt_struct(sreq->send.datatype);
             rndv_rts_hdr->address = (uintptr_t)sreq->send.buffer + s->lb_displ;
 #else
@@ -116,6 +116,7 @@ size_t ucp_tag_rndv_rts_pack(void *dest, void *arg)
         packed_rkey_size      = 0;
     }
 
+    ucs_info("rndv_rts_hdr->address %p, packed_rkey_size %d", rndv_rts_hdr->address, packed_rkey_size);
     return sizeof(*rndv_rts_hdr) + packed_rkey_size;
 }
 
@@ -1068,7 +1069,6 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_progress_rma_put_zcopy, (self),
     size_t iovcnt;
     ucp_dt_state_t state;
 
-    ucs_info("%p", sreq->send.mdesc);
     if (!sreq->send.mdesc) {
         status = ucp_request_send_buffer_reg_lane(sreq, sreq->send.lane, 0);
         ucs_assert_always(status == UCS_OK);
