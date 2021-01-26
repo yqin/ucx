@@ -466,7 +466,7 @@ void ucp_dt_struct_to_cache(ucp_dt_struct_t *s, void *ptr,
 
     k = kh_put(dt_struct, &s->hash, (uint64_t)ptr, &ret);
     /* TODO: check ret - why do we need this test? what exactly does it do? */
-    //ucs_assert_always((ret == 1) || (ret == 2));
+    ucs_assert_always((ret == 1) || (ret == 2));
     kh_value(&s->hash, k) = *val;
 
     ucs_info("dt %p adding to cache (buf %p, md %p, contig.md_map %d, contig.memh %p, non_contig.md_map %d, non_contig.memh %p)", s, ptr, md, val->contig.md_map, val->contig.memh, val->noncontig.md_map, val->noncontig.memh);
@@ -586,13 +586,26 @@ static uct_iov_t* _fill_md_uct_iov_rec(ucp_dt_struct_t *s,
                 iov = _fill_md_uct_iov_rec(s_in, val, ptr, iov);
             } else {
                 /* calculate effective offset */
+#if 1
                 iov->buffer = eptr;
                 iov->length = s_in->len;
                 iov->stride = s->desc[i].extent;
                 status = ucp_dt_struct_register(val->ucp_ctx, val->md_idx, 0, ptr,
-                                                s->desc[i].dt, iov->memh,
+                                                s->desc[i].dt, &iov->memh,
                                                 &md_map);
                 ucs_assert_always(status == UCS_OK);
+                assert(iov->memh != UCT_MEM_HANDLE_NULL);
+#else
+                status = ucp_dt_struct_register(val->ucp_ctx, val->md_idx, 0, ptr,
+                                                s->desc[i].dt, val->noncontig.memh,
+                                                &md_map);
+                ucs_assert_always(status == UCS_OK);
+                iov->buffer = eptr;
+                iov->length = s_in->len;
+                iov->stride = s->desc[i].extent;
+                iov->memh   = val->noncontig.memh[0];
+                assert(iov->memh != UCT_MEM_HANDLE_NULL);
+#endif
             }
         } else {
             /* On the leaf level, all datatypes are contig */
@@ -662,7 +675,7 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     printf("STRUCT reg: addr=%p, datatype=%p\n", buf, s);
 #endif
 
-    ucs_info("Register struct on md, dt %lu, len %ld", dt, s->len);
+    ucs_info("Register struct on md, dt %p, len %ld", dt, s->len);
     ucs_info("memh before registration %p", memh[memh_idx]);
     status = _struct_register_rec(s, &val, buf);
     memh[memh_idx] = val.noncontig.memh[0];
