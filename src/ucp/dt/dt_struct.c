@@ -24,6 +24,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <cuda_runtime.h>
+//#include <hip/hip_runtime.h>
+
 #if ENABLE_STATS
 static ucs_stats_class_t ucp_dt_struct_stats_class = {
     .name           = "dt_struct",
@@ -40,7 +43,8 @@ ucs_status_t _struct_register_ep_rec(uct_ep_h ep, void *buf, ucp_dt_struct_t *s,
 
 ucs_status_t _struct_register_rec(ucp_dt_struct_t *s,
                                   ucp_dt_struct_hash_value_t *val,
-                                  void *buf);
+                                  void *buf, unsigned uct_flags,
+                                  ucs_memory_type_t mem_type);
 
 int ucp_dt_struct_equal(ucp_dt_struct_t *dt1, ucp_dt_struct_t *dt2)
 {
@@ -169,7 +173,7 @@ static ssize_t _elem_by_offset( const ucp_dt_struct_t *s, size_t offset,
 }
 
 
-static size_t _dte_pack( const ucp_dt_struct_t *s,
+static size_t _dte_pack( const ucp_dt_struct_t *s, ucs_memory_type_t mem_type,
                          const void *inbuf, void *outbuf,
                          size_t out_offset_orig, size_t len)
 {
@@ -194,14 +198,37 @@ static size_t _dte_pack( const ucp_dt_struct_t *s,
         case UCP_DATATYPE_CONTIG:
             elem_len = ucp_contig_dt_length(dsc->dt, 1);
             copy_len = ucs_min(elem_len - elem_offs_int, len);
-            memcpy(outbuf + out_offs,
-                   (inbuf + elem_offs + elem_offs_int),
-                   copy_len);
+
+            /* TODO: would be better to use callback from uct so we don't need
+             *       to link all these runtimes into UCP
+             */
+            switch (mem_type) {
+            case UCS_MEMORY_TYPE_HOST:
+            case UCS_MEMORY_TYPE_CUDA_MANAGED:
+            case UCS_MEMORY_TYPE_ROCM_MANAGED:
+                memcpy(outbuf + out_offs, (inbuf + elem_offs + elem_offs_int),
+                       copy_len);
+                break;
+            case UCS_MEMORY_TYPE_CUDA:
+                cudaMemcpy(outbuf + out_offs, (inbuf + elem_offs + elem_offs_int),
+                           copy_len, cudaMemcpyDeviceToHost);
+                break;
+#if 0
+            case UCS_MEMORY_TYPE_ROCM:
+                hipMemcpy(outbuf + out_offs, (inbuf + elem_offs + elem_offs_int),
+                          copy_len, hipMemcpyDeviceToHost);
+                break;
+#endif
+            default:
+                ucs_fatal("unexpected memory type=%d", mem_type);
+                return 0;
+            }
+
             break;
         case UCP_DATATYPE_STRUCT:
             sub_s = ucp_dt_struct(dsc->dt);
-            copy_len = _dte_pack(sub_s, inbuf + elem_offs, outbuf + out_offs,
-                                 elem_offs_int, len);
+            copy_len = _dte_pack(sub_s, mem_type, inbuf + elem_offs,
+                                 outbuf + out_offs, elem_offs_int, len);
             break;
         }
         /* after the first iteration we will always be copying from the
@@ -221,7 +248,7 @@ static size_t _dte_pack( const ucp_dt_struct_t *s,
     return out_offs;
 }
 
-static size_t _dte_unpack(const ucp_dt_struct_t *s,
+static size_t _dte_unpack(const ucp_dt_struct_t *s, ucs_memory_type_t mem_type,
                           const void *inbuf, void *outbuf,
                          size_t in_offset_orig, size_t len)
 {
@@ -246,13 +273,36 @@ static size_t _dte_unpack(const ucp_dt_struct_t *s,
         case UCP_DATATYPE_CONTIG:
             elem_len = ucp_contig_dt_length(dsc->dt, 1);
             copy_len = ucs_min(elem_len - elem_offs_int, len);
-            memcpy((outbuf + elem_offs + elem_offs_int),
-                   (inbuf + in_offset),
-                   copy_len);
+
+            /* TODO: would be better to use callback from uct so we don't need
+             *       to link all these runtimes into UCP
+             */
+            switch (mem_type) {
+            case UCS_MEMORY_TYPE_HOST:
+            case UCS_MEMORY_TYPE_CUDA_MANAGED:
+            case UCS_MEMORY_TYPE_ROCM_MANAGED:
+                memcpy((outbuf + elem_offs + elem_offs_int), (inbuf + in_offset),
+                       copy_len);
+                break;
+            case UCS_MEMORY_TYPE_CUDA:
+                cudaMemcpy((outbuf + elem_offs + elem_offs_int),
+                           (inbuf + in_offset), copy_len, cudaMemcpyHostToDevice);
+                break;
+#if 0
+            case UCS_MEMORY_TYPE_ROCM:
+                hipMemcpy((outbuf + elem_offs + elem_offs_int),
+                          (inbuf + in_offset), copy_len, hipMemcpyHostToDevice);
+                break;
+#endif
+            default:
+                ucs_fatal("unexpected memory type=%d", mem_type);
+                return 0;
+            }
+
             break;
         case UCP_DATATYPE_STRUCT:
             sub_s = ucp_dt_struct(dsc->dt);
-            copy_len = _dte_unpack(sub_s, inbuf + in_offset,
+            copy_len = _dte_unpack(sub_s, mem_type, inbuf + in_offset,
                                    outbuf + elem_offs, elem_offs_int,
                                    len);
             break;
@@ -399,7 +449,8 @@ void ucp_dt_destroy_struct(ucp_datatype_t datatype_p)
 }
 
 void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
-                          size_t length, size_t offset)
+                          ucs_memory_type_t mem_type, size_t length,
+                          size_t offset)
 {
     size_t processed_len;
     ucp_dt_struct_t *s = ucp_dt_struct(dt);
@@ -407,15 +458,16 @@ void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
      * Right now it always performs the "seek" operation which is
      * inefficient
      */
-     processed_len = _dte_pack(s, src, dest, offset, length);
+     processed_len = _dte_pack(s, mem_type, src, dest, offset, length);
 
      /* We assume that the sane length was provided */
      ucs_assert(processed_len == length);
      (void)processed_len;
 }
 
-size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt,
-                             const void *src, size_t length, size_t offset)
+size_t ucp_dt_struct_scatter(void *dst, const void *src, ucp_datatype_t dt,
+                             ucs_memory_type_t mem_type, size_t length,
+                             size_t offset)
 {
     size_t processed_len;
     ucp_dt_struct_t *s = ucp_dt_struct(dt);
@@ -423,7 +475,7 @@ size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt,
      * Right now it always performs the "seek" operation which is
      * inefficient
      */
-     processed_len = _dte_unpack(s, src, dst, offset, length);
+     processed_len = _dte_unpack(s, mem_type, src, dst, offset, length);
 
      /* We assume that the sane length was provided */
      ucs_assert(processed_len == length);
@@ -567,8 +619,9 @@ ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
 
 static uct_iov_t* _fill_md_uct_iov_rec(ucp_dt_struct_t *s,
                                        ucp_dt_struct_hash_value_t *val,
-                                       void *buf,
-                                       uct_iov_t *iovs)
+                                       void *buf, uct_iov_t *iovs,
+                                       unsigned uct_flags,
+                                       ucs_memory_type_t mem_type)
 {
     uct_iov_t *iov = iovs;
     ucp_dt_struct_t *s_in;
@@ -583,7 +636,7 @@ static uct_iov_t* _fill_md_uct_iov_rec(ucp_dt_struct_t *s,
         if (UCP_DT_IS_STRUCT(s->desc[i].dt)) {
             s_in = ucp_dt_struct(s->desc[i].dt);
             if (s_in->rep_count == 1) {
-                iov = _fill_md_uct_iov_rec(s_in, val, ptr, iov);
+                iov = _fill_md_uct_iov_rec(s_in, val, ptr, iov, uct_flags, mem_type);
             } else {
                 /* calculate effective offset */
 #if 1
@@ -591,8 +644,9 @@ static uct_iov_t* _fill_md_uct_iov_rec(ucp_dt_struct_t *s,
                 iov->length = s_in->len;
                 iov->stride = s->desc[i].extent;
                 status = ucp_dt_struct_register(val->ucp_ctx, val->md_idx, 0, ptr,
-                                                s->desc[i].dt, &iov->memh,
-                                                &md_map);
+                                                s->desc[i].dt,
+                                                uct_flags, mem_type,
+                                                &iov->memh, &md_map);
                 ucs_assert_always(status == UCS_OK);
                 assert(iov->memh != UCT_MEM_HANDLE_NULL);
 #else
@@ -621,14 +675,15 @@ static uct_iov_t* _fill_md_uct_iov_rec(ucp_dt_struct_t *s,
 
 ucs_status_t _struct_register_rec(ucp_dt_struct_t *s,
                                   ucp_dt_struct_hash_value_t *val,
-                                  void *buf)
+                                  void *buf, unsigned uct_flags,
+                                  ucs_memory_type_t mem_type)
 {
     uct_md_h md = val->ucp_ctx->tl_mds[val->md_idx].md;
     size_t iov_cnt  = s->uct_iov_count;
     uct_iov_t *iovs = ucs_calloc(iov_cnt, sizeof(*iovs), "umr_iovs");
     ucs_status_t status;
 
-    _fill_md_uct_iov_rec(s, val, buf, iovs);
+    _fill_md_uct_iov_rec(s, val, buf, iovs, uct_flags, mem_type);
 
     status = uct_md_mem_reg_nc(md, iovs, iov_cnt, s->rep_count, &val->noncontig.memh[0]);
     if (status != UCS_OK) {
@@ -647,6 +702,8 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
                                     ucp_md_index_t md_idx,
                                     ucp_md_index_t memh_idx,
                                     void *buf, ucp_datatype_t dt,
+                                    unsigned uct_flags,
+                                    ucs_memory_type_t mem_type,
                                     uct_mem_h* memh,
                                     ucp_md_map_t *md_map_p)
 {
@@ -666,8 +723,8 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
     status = ucp_mem_rereg_mds(val.ucp_ctx, UCS_BIT(val.md_idx),
                                buf + s->lb_displ,
                                s->extent,
-                               UCT_MD_MEM_ACCESS_ALL, NULL,
-                               UCS_MEMORY_TYPE_HOST, NULL,
+                               uct_flags, NULL,
+                               mem_type, NULL,
                                val.contig.memh,
                                &val.contig.md_map);
 
@@ -677,7 +734,7 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
 
     ucs_info("Register struct on md, dt %p, len %ld", dt, s->len);
     ucs_info("memh before registration %p", memh[memh_idx]);
-    status = _struct_register_rec(s, &val, buf);
+    status = _struct_register_rec(s, &val, buf, uct_flags, mem_type);
     memh[memh_idx] = val.noncontig.memh[0];
     ucs_info("memh after registration %p", memh[memh_idx]);
     //if (*memh) (*md_map_p)++;
@@ -716,6 +773,7 @@ ucs_status_t ucp_dt_struct_register_mds(ucp_context_t *context,
             } else {
                 status = ucp_dt_struct_register(context, md_index, memh_index,
                                                 buffer, datatype,
+                                                uct_flags, mem_type,
                                                 uct_memh,
                                                 md_map_p);
             }

@@ -173,10 +173,12 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
 void ucp_dt_destroy_struct(ucp_datatype_t datatype_p);
 
 void ucp_dt_struct_gather(void *dest, const void *src, ucp_datatype_t dt,
-                          size_t length, size_t offset);
+                          ucs_memory_type_t mem_type, size_t length,
+                          size_t offset);
 
-size_t ucp_dt_struct_scatter(void *dst, ucp_datatype_t dt, const void *src,
-                          size_t length, size_t offset);
+size_t ucp_dt_struct_scatter(void *dst, const void *src, ucp_datatype_t dt,
+                             ucs_memory_type_t mem_type, size_t length,
+                             size_t offset);
 
 ucs_status_t ucp_dt_struct_register_ep(ucp_ep_h ep, ucp_lane_index_t lane,
                                        void *buf, ucp_datatype_t dt, uct_mem_h
@@ -187,6 +189,8 @@ ucs_status_t ucp_dt_struct_register(ucp_context_t *context,
                                     ucp_md_index_t md_idx,
                                     ucp_md_index_t memh_idx,
                                     void *buf, ucp_datatype_t dt,
+                                    unsigned uct_flags,
+                                    ucs_memory_type_t mem_type,
                                     uct_mem_h* memh,
                                     ucp_md_map_t *md_map_p);
 

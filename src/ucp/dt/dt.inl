@@ -86,8 +86,8 @@ ucp_dt_unpack_only(ucp_worker_h worker, void *buffer, size_t count,
             goto err_truncated;
         }
         iov_offset = 0;
-        UCS_PROFILE_CALL(ucp_dt_struct_scatter, buffer, /*count,*/ datatype,
-                                               data, length, 0);
+        UCS_PROFILE_CALL(ucp_dt_struct_scatter,
+                         buffer, data, datatype, mem_type, length, 0);
         return UCS_OK;
 
     case UCP_DATATYPE_GENERIC:

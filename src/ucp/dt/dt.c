@@ -206,8 +206,8 @@ size_t ucp_dt_pack(ucp_worker_h worker, ucp_datatype_t datatype,
                                             state->offset, dest, length);
         break;
     case UCP_DATATYPE_STRUCT:
-        UCS_PROFILE_CALL_VOID(ucp_dt_struct_gather, dest, src, datatype, length,
-                              state->offset);
+        UCS_PROFILE_CALL_VOID(ucp_dt_struct_gather, dest, src, datatype,
+                              mem_type, length, state->offset);
         result_len = length;
         break;
     default:

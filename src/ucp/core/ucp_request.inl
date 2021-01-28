@@ -511,9 +511,9 @@ ucp_request_recv_data_unpack(ucp_request_t *req, const void *data,
         }
         return status;
     case UCP_DATATYPE_STRUCT:
-        UCS_PROFILE_CALL_VOID(ucp_dt_struct_scatter,
-                              req->recv.buffer, req->recv.datatype,
-                              data, length, offset);
+        UCS_PROFILE_CALL(ucp_dt_struct_scatter,
+                         req->recv.buffer, data, req->recv.datatype,
+                         req->recv.mem_type, length, offset);
         return UCS_OK;
     default:
         ucs_fatal("unexpected datatype=%lx", req->recv.datatype);
