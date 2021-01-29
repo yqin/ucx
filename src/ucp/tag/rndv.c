@@ -1321,39 +1321,75 @@ static ucs_status_t ucp_rndv_pipeline(ucp_request_t *sreq, ucp_rndv_rtr_hdr_t *r
             freq->send.lane                       = fsreq->send.lane;
             freq->send.mdesc                      = NULL;
         } else {
-            /* perform get on memtype endpoint to stage data to host memory */
-            mem_type_ep       = worker->mem_type_ep[sreq->send.mem_type];
-            mem_type_rma_lane = ucp_ep_config(mem_type_ep)->key.rma_bw_lanes[0];
-            if (mem_type_rma_lane == UCP_NULL_LANE) {
-                return UCS_ERR_UNSUPPORTED;
+            /* contig */
+            if (!UCP_DT_IS_STRUCT(sreq->send.datatype)) {
+                /* perform get on memtype endpoint to stage data to host memory */
+                mem_type_ep       = worker->mem_type_ep[sreq->send.mem_type];
+                mem_type_rma_lane = ucp_ep_config(mem_type_ep)->key.rma_bw_lanes[0];
+                if (mem_type_rma_lane == UCP_NULL_LANE) {
+                    return UCS_ERR_UNSUPPORTED;
+                }
+
+                mdesc = ucp_worker_mpool_get(&worker->rndv_frag_mp);
+                if (mdesc == NULL) {
+                    status = UCS_ERR_NO_MEMORY;
+                    goto out;
+                }
+
+                ucp_request_send_state_init(freq, ucp_dt_make_contig(1), 0);
+                ucp_request_send_state_reset(freq, ucp_rndv_frag_get_completion,
+                                             UCP_REQUEST_SEND_PROTO_RNDV_GET);
+                md_index                              = ucp_ep_md_index(mem_type_ep, mem_type_rma_lane);
+                freq->send.ep                         = mem_type_ep;
+                freq->send.buffer                     = mdesc + 1;
+                freq->send.datatype                   = ucp_dt_make_contig(1);
+                freq->send.mem_type                   = sreq->send.mem_type;
+                freq->send.state.dt.dt.contig.memh[0] = ucp_memh2uct(mdesc->memh, md_index);
+                freq->send.state.dt.dt.contig.md_map  = UCS_BIT(md_index);
+                freq->send.length                     = length;
+                freq->send.uct.func                   = ucp_rndv_progress_rma_get_zcopy;
+                freq->send.rndv_get.rkey              = NULL;
+                freq->send.rndv_get.remote_address    =
+                        (uint64_t)UCS_PTR_BYTE_OFFSET(fsreq->send.buffer, offset);
+                freq->send.rndv_get.lanes_map         = 0;
+                freq->send.rndv_get.lane_count        = 0;
+                freq->send.rndv_get.rreq              = fsreq;
+                freq->send.mdesc                      = mdesc;
             }
-
-            mdesc = ucp_worker_mpool_get(&worker->rndv_frag_mp);
-            if (mdesc == NULL) {
-                status = UCS_ERR_NO_MEMORY;
-                goto out;
+            /* UMR */
+            else {
+                /* directly do put */
+                ucp_request_send_state_reset(freq, ucp_rndv_frag_send_put_completion,
+                                             UCP_REQUEST_SEND_PROTO_RNDV_PUT);
+                md_index                              = ucp_ep_md_index(sreq->send.ep,
+                                                                        sreq->send.lane);
+                freq->send.ep                         = sreq->send.ep;
+                freq->send.buffer                     = UCS_PTR_BYTE_OFFSET(sreq->send.buffer,
+                                                                            offset);
+                freq->send.datatype                   = sreq->send.datatype;
+                freq->send.mem_type                   = sreq->send.mem_type;
+                freq->send.state.dt.dt.contig.memh[0] =
+                    ucp_memh_map2uct(sreq->send.state.dt.dt.contig.memh,
+                                     sreq->send.state.dt.dt.contig.md_map, md_index);
+                freq->send.state.dt.dt.contig.md_map  = UCS_BIT(md_index);
+                freq->send.state.dt.dt.struct_dt.contig.memh[0] =
+                    ucp_memh_map2uct(sreq->send.state.dt.dt.struct_dt.contig.memh,
+                                     sreq->send.state.dt.dt.struct_dt.contig.md_map, md_index);
+                freq->send.state.dt.dt.struct_dt.contig.md_map  = UCS_BIT(md_index);
+                freq->send.state.dt.dt.struct_dt.non_contig.memh[0] =
+                    ucp_memh_map2uct(sreq->send.state.dt.dt.struct_dt.non_contig.memh,
+                                     sreq->send.state.dt.dt.struct_dt.non_contig.md_map, md_index);
+                freq->send.state.dt.dt.struct_dt.non_contig.md_map  = UCS_BIT(md_index);
+                freq->send.length                     = length;
+                freq->send.uct.func                   = ucp_rndv_progress_rma_put_zcopy;
+                freq->send.rndv_put.sreq              = fsreq;
+                freq->send.rndv_put.rkey              = fsreq->send.rndv_put.rkey;
+                freq->send.rndv_put.uct_rkey          = fsreq->send.rndv_put.uct_rkey;
+                freq->send.rndv_put.remote_address    = rndv_rtr_hdr->address + offset;
+                freq->send.rndv_put.remote_request    = rndv_rtr_hdr->rreq_ptr;
+                freq->send.lane                       = fsreq->send.lane;
+                freq->send.mdesc                      = NULL;
             }
-
-            ucp_request_send_state_init(freq, ucp_dt_make_contig(1), 0);
-            ucp_request_send_state_reset(freq, ucp_rndv_frag_get_completion,
-                                         UCP_REQUEST_SEND_PROTO_RNDV_GET);
-            md_index                              = ucp_ep_md_index(mem_type_ep, mem_type_rma_lane);
-            freq->send.ep                         = mem_type_ep;
-            freq->send.buffer                     = mdesc + 1;
-            freq->send.datatype                   = ucp_dt_make_contig(1);
-            freq->send.mem_type                   = sreq->send.mem_type;
-            freq->send.state.dt.dt.contig.memh[0] = ucp_memh2uct(mdesc->memh, md_index);
-            freq->send.state.dt.dt.contig.md_map  = UCS_BIT(md_index);
-            freq->send.length                     = length;
-            freq->send.uct.func                   = ucp_rndv_progress_rma_get_zcopy;
-            freq->send.rndv_get.rkey              = NULL;
-            freq->send.rndv_get.remote_address    =
-                    (uint64_t)UCS_PTR_BYTE_OFFSET(fsreq->send.buffer, offset);
-            freq->send.rndv_get.lanes_map         = 0;
-            freq->send.rndv_get.lane_count        = 0;
-            freq->send.rndv_get.rreq              = fsreq;
-            freq->send.mdesc                      = mdesc;
-
         }
 
         ucp_request_send(freq, 0);
@@ -1504,6 +1540,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rtr_handler,
                 (sreq->send.length >= ucp_ep_config(ep)->tag.rndv.min_put_zcopy) &&
                 /* is PUT Zcopy operation supported? */
                 (ucp_ep_config(ep)->tag.rndv.max_put_zcopy != 0)) {
+
                 ucp_request_send_state_reset(sreq, ucp_rndv_put_completion,
                                              UCP_REQUEST_SEND_PROTO_RNDV_PUT);
                 sreq->send.uct.func                = ucp_rndv_progress_rma_put_zcopy;
