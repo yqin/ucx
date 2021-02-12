@@ -764,7 +764,7 @@ static ucs_status_t uct_ib_mlx5_umr_create_qp(uct_ib_mlx5_md_t *md)
     umr_qp_attr_ex.cap.max_recv_wr     = 16;
     umr_qp_attr_ex.cap.max_send_sge    = 1;
     umr_qp_attr_ex.cap.max_recv_sge    = 1;
-    umr_qp_attr_ex.cap.max_inline_data = 0;
+    umr_qp_attr_ex.cap.max_inline_data = 512;
     umr_qp_attr_ex.qp_type             = IBV_QPT_RC;
     umr_qp_attr_ex.comp_mask          |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS | IBV_QP_INIT_ATTR_PD;
     umr_qp_attr_ex.pd                  = md->super.pd;
@@ -918,7 +918,7 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     }
     status = ibv_wr_complete(umr->md->umr_qpx);
     if (status) {
-        ucs_error("failed to post UMR WQE: %m");
+        ucs_error("failed to post UMR WQE (return code %d): %m", status);
         goto err_out;
     }
 
