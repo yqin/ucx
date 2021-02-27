@@ -66,7 +66,7 @@ typedef struct uct_ib_md_ext_config {
                                                          device */
     int                      enable_indirect_atomic; /** Enable indirect atomic */
     int                      enable_gpudirect_rdma; /** Enable GPUDirect RDMA */
-#if HAVE_EXP_UMR
+#if HAVE_EXP_UMR | HAVE_DV_UMR
     unsigned                 max_inline_klm_list; /* Maximal length of inline KLM list */
 #endif
 

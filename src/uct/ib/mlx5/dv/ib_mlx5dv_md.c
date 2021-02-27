@@ -748,11 +748,13 @@ static ucs_status_t uct_ib_mlx5_umr_create_qp(uct_ib_mlx5_md_t *md)
         goto err;
     }
 
-    /* YQ: do we need to do anything here? */
+    /* YQ: need to query device for the max inline klms supported, hard-coded */
 #if HAVE_EXP_UMR
     md->super.config.max_inline_klm_list =
         ucs_min(md->super.config.max_inline_klm_list,
                 ibdev->dev_attr.umr_caps.max_send_wqe_inline_klms);
+#else
+    md->super.config.max_inline_klm_list = 32;
 #endif
 
     memset(&umr_qp_attr_ex, 0, sizeof(struct ibv_qp_init_attr_ex));
@@ -760,11 +762,13 @@ static ucs_status_t uct_ib_mlx5_umr_create_qp(uct_ib_mlx5_md_t *md)
     umr_qp_attr_ex.send_cq             = md->umr_cq;
     umr_qp_attr_ex.recv_cq             = md->umr_cq;
     umr_qp_attr_ex.srq                 = NULL;
+    /* YQ: hard-coded below */
     umr_qp_attr_ex.cap.max_send_wr     = 16;
     umr_qp_attr_ex.cap.max_recv_wr     = 16;
     umr_qp_attr_ex.cap.max_send_sge    = 1;
     umr_qp_attr_ex.cap.max_recv_sge    = 1;
-    umr_qp_attr_ex.cap.max_inline_data = 512;
+    umr_qp_attr_ex.cap.max_inline_data = md->super.config.max_inline_klm_list *
+                                         sizeof(struct mlx5_wqe_umr_klm_seg);
     umr_qp_attr_ex.qp_type             = IBV_QPT_RC;
     umr_qp_attr_ex.comp_mask          |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS | IBV_QP_INIT_ATTR_PD;
     umr_qp_attr_ex.pd                  = md->super.pd;
@@ -877,6 +881,12 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     struct mlx5dv_mkey_init_attr mkey_init_attr = {};
     uint32_t access_flags;
     struct ibv_wc wc = {};
+    uint32_t ptr_mkey;
+    void *ptr_address;
+    size_t ptr_length;
+    unsigned ptr_flags;
+    uct_mem_h ptr_memh;
+    unsigned max_inline_klm_list = md->super.config.max_inline_klm_list;
     int ret;
     ucs_status_t status;
 
@@ -902,16 +912,62 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     ucs_info("created UMR mkey %p, lkey 0x%x, rkey 0x%x",
               umr->mkey, umr->mkey->lkey, umr->mkey->rkey);
 
+    /* allocate and register buffer for noninline UMR registrataion */
+    if (umr->iov_count > max_inline_klm_list) {
+        /* allocate buffer for noninline UMR registration, has to be 2KB aligned */
+        ptr_length = mkey_init_attr.max_entries * sizeof(struct mlx5_wqe_umr_pointer_seg);
+        ret = ucs_posix_memalign(&ptr_address, 2048, ptr_length, "noninline UMR buffer");
+        if (ret != 0) {
+            ucs_fatal("failed to allocate %zu bytes for noninline UMR buffer: %m", ptr_length);
+        } else {
+            ucs_info("allocated %zu bytes for noninline UMR buffer %p", ptr_length, ptr_address);
+        }
+
+        /* register noninline UMR buffer */
+        ptr_flags = UCT_MD_MEM_ACCESS_ALL;
+        status = uct_md_mem_reg(&md->super.super,
+                                ptr_address, ptr_length, ptr_flags, &ptr_memh);
+        if (status == UCS_OK) {
+            ucs_info("registered noninline UMR buffer %p length %zu on md[%d] memh %p",
+                     ptr_address, ptr_length, md, memh);
+        } else {
+            ucs_fatal("failed to register noninline UMR buffer %p length %zu on md[%d]",
+                      ptr_address, ptr_length, md);
+        }
+        ptr_mkey = ((uct_ib_mem_t *)ptr_memh)->lkey;
+        ucs_info("lkey 0x%x, rkey 0x%x, atomic_key 0x%p, flags %d", ((uct_ib_mem_t *)ptr_memh)->lkey, ((uct_ib_mem_t *)ptr_memh)->rkey, ((uct_ib_mem_t *)ptr_memh)->atomic_rkey, ((uct_ib_mem_t *)ptr_memh)->flags);
+    }
+
     /* register UMR */
     ibv_wr_start(umr->md->umr_qpx);
     access_flags = UCT_IB_MEM_ACCESS_FLAGS;
     if (umr->umr_type == MLX5DV_UMR_MR_INTERLEAVED) {
-        mlx5dv_wr_mr_interleaved(umr->md->umr_dv_qp, umr->mkey, access_flags,
-                                 umr->repeat_count, umr->iov_count,
-                                 umr->interleaved_entries);
+        if (umr->iov_count <= max_inline_klm_list) {
+            mlx5dv_wr_mr_interleaved(umr->md->umr_dv_qp, umr->mkey, access_flags,
+                                     umr->repeat_count, umr->iov_count,
+                                     umr->interleaved_entries);
+        } else {
+            umr->md->umr_dv_qp->wr_mr_noninline(umr->md->umr_dv_qp, umr->mkey,
+                                                access_flags, umr->repeat_count,
+                                                umr->iov_count,
+                                                umr->interleaved_entries,
+                                                NULL,
+                                                ptr_mkey,
+                                                ptr_address);
+        }
     } else if (umr->umr_type == MLX5DV_UMR_MR_LIST) {
-        mlx5dv_wr_mr_list(umr->md->umr_dv_qp, umr->mkey, access_flags,
-                          umr->iov_count, umr->list_entries);
+        if (umr->iov_count <= max_inline_klm_list) {
+            mlx5dv_wr_mr_list(umr->md->umr_dv_qp, umr->mkey, access_flags,
+                              umr->iov_count, umr->list_entries);
+        } else {
+            umr->md->umr_dv_qp->wr_mr_noninline(umr->md->umr_dv_qp, umr->mkey,
+                                                access_flags, umr->repeat_count,
+                                                umr->iov_count,
+                                                NULL,
+                                                umr->list_entries,
+                                                ptr_mkey,
+                                                ptr_address);
+        }
     } else {
         ucs_fatal("UMR type not supported");
         return UCS_ERR_UNSUPPORTED;
@@ -975,6 +1031,16 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     umr->memh.mr->rkey = umr->mkey->rkey;
 
 err_out:
+    /* clean up noninline UMR buffer */
+    if (umr->iov_count > max_inline_klm_list) {
+        status = uct_md_mem_dereg(&md->super.super, ptr_memh);
+        if (status != UCS_OK) {
+            ucs_fatal("failed to deregister noninline UMR buffer %p memh %p",
+                      ptr_address, memh);
+        }
+        ucs_free(ptr_address);
+    }
+
     return status;
 }
 
