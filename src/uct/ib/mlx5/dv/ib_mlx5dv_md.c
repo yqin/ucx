@@ -887,6 +887,7 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     unsigned ptr_flags;
     uct_mem_h ptr_memh;
     unsigned max_inline_klm_list = md->super.config.max_inline_klm_list;
+    unsigned num_blocks;
     int ret;
     ucs_status_t status;
 
@@ -904,6 +905,7 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
         ucs_fatal("UMR type not supported");
         return UCS_ERR_UNSUPPORTED;
     }
+
     umr->mkey = mlx5dv_create_mkey(&mkey_init_attr);
     if (umr->mkey == NULL) {
         ucs_fatal("failed to create UMR mkey: %m");
@@ -912,10 +914,26 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     ucs_info("created UMR mkey %p, lkey 0x%x, rkey 0x%x",
               umr->mkey, umr->mkey->lkey, umr->mkey->rkey);
 
+    /* after mkey creation, max_entries will reflect the actual max_entries
+     * required
+     */
+    num_blocks = mkey_init_attr.max_entries;
+
     /* allocate and register buffer for noninline UMR registrataion */
-    if (umr->iov_count > max_inline_klm_list) {
+    if (num_blocks > max_inline_klm_list) {
+#if 0
+        if (umr->umr_type == MLX5DV_UMR_MR_INTERLEAVED) {
+            ptr_length = sizeof(struct mlx5_wqe_umr_repeat_block_seg) +
+                         umr->iov_count * sizeof(struct mlx5_wqe_umr_repeat_ent_seg);
+        } else if (umr->umr_type == MLX5DV_UMR_MR_LIST) {
+            ptr_length = umr->iov_count * sizeof(struct mlx5_wqe_umr_klm_seg);
+        }
+        /* make sure ptr_length is multiplier of 64B */
+        ptr_length = ALIGN(ptr_length, 64);
+#endif
+        ptr_length = num_blocks * 16;
+
         /* allocate buffer for noninline UMR registration, has to be 2KB aligned */
-        ptr_length = mkey_init_attr.max_entries * sizeof(struct mlx5_wqe_umr_pointer_seg);
         ret = ucs_posix_memalign(&ptr_address, 2048, ptr_length, "noninline UMR buffer");
         if (ret != 0) {
             ucs_fatal("failed to allocate %zu bytes for noninline UMR buffer: %m", ptr_length);
@@ -928,10 +946,10 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
         status = uct_md_mem_reg(&md->super.super,
                                 ptr_address, ptr_length, ptr_flags, &ptr_memh);
         if (status == UCS_OK) {
-            ucs_info("registered noninline UMR buffer %p length %zu on md[%d] memh %p",
+            ucs_info("registered noninline UMR buffer %p length %zu on md %p memh %p",
                      ptr_address, ptr_length, md, memh);
         } else {
-            ucs_fatal("failed to register noninline UMR buffer %p length %zu on md[%d]",
+            ucs_fatal("failed to register noninline UMR buffer %p length %zu on md %p",
                       ptr_address, ptr_length, md);
         }
         ptr_mkey = ((uct_ib_mem_t *)ptr_memh)->lkey;
@@ -942,7 +960,7 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
     ibv_wr_start(umr->md->umr_qpx);
     access_flags = UCT_IB_MEM_ACCESS_FLAGS;
     if (umr->umr_type == MLX5DV_UMR_MR_INTERLEAVED) {
-        if (umr->iov_count <= max_inline_klm_list) {
+        if (num_blocks <= max_inline_klm_list) {
             mlx5dv_wr_mr_interleaved(umr->md->umr_dv_qp, umr->mkey, access_flags,
                                      umr->repeat_count, umr->iov_count,
                                      umr->interleaved_entries);
@@ -956,7 +974,7 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
                                                 ptr_address);
         }
     } else if (umr->umr_type == MLX5DV_UMR_MR_LIST) {
-        if (umr->iov_count <= max_inline_klm_list) {
+        if (num_blocks <= max_inline_klm_list) {
             mlx5dv_wr_mr_list(umr->md->umr_dv_qp, umr->mkey, access_flags,
                               umr->iov_count, umr->list_entries);
         } else {
@@ -1032,7 +1050,7 @@ uct_ib_mlx5_umr_register(uct_ib_mlx5_md_t *md, uct_ib_mem_t *memh,
 
 err_out:
     /* clean up noninline UMR buffer */
-    if (umr->iov_count > max_inline_klm_list) {
+    if (num_blocks > max_inline_klm_list) {
         status = uct_md_mem_dereg(&md->super.super, ptr_memh);
         if (status != UCS_OK) {
             ucs_fatal("failed to deregister noninline UMR buffer %p memh %p",
