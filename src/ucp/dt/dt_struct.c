@@ -344,6 +344,7 @@ ucs_status_t ucp_dt_create_struct(ucp_struct_dt_desc_t *desc_ptr,
                 /* Currently we cannot repeat struct datatype
                  * as it requires re-registration of the UMR.
                  * TODO: fix this if needed in future */
+                ucs_warn("HW datatype repeat count greater than 1, not supported");
                 return UCS_ERR_NOT_IMPLEMENTED;
             }
         case UCP_DATATYPE_CONTIG:

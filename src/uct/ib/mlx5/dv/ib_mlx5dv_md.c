@@ -622,8 +622,8 @@ uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
     unsigned max_depth = IBV_DEVICE_UMR_CAPS(dev_attr, max_umr_recursion_depth);
     unsigned max_klm_list_size = IBV_DEVICE_UMR_CAPS(dev_attr, max_klm_list_size);
 #else
-    unsigned max_depth = 512;
-    unsigned max_klm_list_size = 512;
+    unsigned max_depth = 1024;
+    unsigned max_klm_list_size = 1024;
 #endif
     unsigned iov_depth, umr_depth, iov_idx;
 
@@ -633,6 +633,8 @@ uct_ib_md_calc_required_klms(uct_ib_mlx5_md_t *md, const uct_iov_t *iov,
 #else
     if (iovcnt > max_klm_list_size) {
 #endif
+        ucs_error("iov count (%d) is greater than max (%d)",
+                  iovcnt, max_klm_list_size);
         return UCS_ERR_UNSUPPORTED;
     }
 
