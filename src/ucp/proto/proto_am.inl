@@ -243,8 +243,13 @@ void ucp_dt_iov_copy_uct(ucp_context_h context, uct_iov_t *iov, size_t *iovcnt,
              *     zero-based address should already reflect the lower bound
              *     so no need to offset it
              */
-            iov[0].buffer = UCS_PTR_BYTE_OFFSET(0x0,
-                                                state->offset);
+            if (UCP_MEM_IS_ACCESSIBLE_FROM_CPU(state->dt.struct_dt.mem_type)) {
+                iov[0].buffer = UCS_PTR_BYTE_OFFSET(0x0,
+                                                    state->offset);
+            } else {
+                iov[0].buffer = UCS_PTR_BYTE_OFFSET(0x0,
+                                                    state->dt.struct_dt.frag_offset);
+            }
 #endif
             iov[0].length = length_max;
             iov[0].stride = 0;

@@ -39,6 +39,8 @@ typedef struct ucp_dt_state {
             ucp_dt_reg_t          contig;     /* memh for contig space covering
                                                  all struct*/
             ucp_dt_reg_t          non_contig; /* indirect memh (umr) */
+            ucs_memory_type_t     mem_type;   /* memory type when req is not avail */
+            size_t                frag_offset;/* offset used in RNDV protocol */
         } struct_dt;
     } dt;
 } ucp_dt_state_t;

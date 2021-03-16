@@ -1284,6 +1284,13 @@ static ucs_status_t ucp_rndv_pipeline(ucp_request_t *sreq, ucp_rndv_rtr_hdr_t *r
     fsreq->send.rndv_put.remote_address = rndv_rtr_hdr->address;
     fsreq->send.rndv_put.sreq           = sreq;
     fsreq->send.state.dt.offset         = 0;
+    fsreq->send.state.dt.dt.struct_dt.frag_offset = 0;
+
+    /* if memory has not been registered yet register it */
+    if (!sreq->send.state.dt.dt.contig.memh[0]) {
+        status = ucp_request_send_buffer_reg_lane(sreq, sreq->send.lane, 0);
+        ucs_assert_always(status == UCS_OK);
+    }
 
     offset = 0;
     for (i = 0; i < num_frags; i++) {
@@ -1380,6 +1387,9 @@ static ucs_status_t ucp_rndv_pipeline(ucp_request_t *sreq, ucp_rndv_rtr_hdr_t *r
                     ucp_memh_map2uct(sreq->send.state.dt.dt.struct_dt.non_contig.memh,
                                      sreq->send.state.dt.dt.struct_dt.non_contig.md_map, md_index);
                 freq->send.state.dt.dt.struct_dt.non_contig.md_map  = UCS_BIT(md_index);
+                freq->send.state.dt.dt.struct_dt.mem_type = sreq->send.mem_type;
+                freq->send.state.dt.dt.struct_dt.frag_offset =
+                    fsreq->send.state.dt.dt.struct_dt.frag_offset;
                 freq->send.length                     = length;
                 freq->send.uct.func                   = ucp_rndv_progress_rma_put_zcopy;
                 freq->send.rndv_put.sreq              = fsreq;
@@ -1394,6 +1404,7 @@ static ucs_status_t ucp_rndv_pipeline(ucp_request_t *sreq, ucp_rndv_rtr_hdr_t *r
 
         ucp_request_send(freq, 0);
         offset += length;
+        fsreq->send.state.dt.dt.struct_dt.frag_offset += length;
     }
 
     return UCS_OK;
