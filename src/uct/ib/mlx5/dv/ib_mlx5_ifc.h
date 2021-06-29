@@ -624,11 +624,12 @@ struct uct_ib_mlx5_query_hca_vport_context_in_bits {
 };
 
 enum {
-    UCT_IB_MLX5_MKC_ACCESS_MODE_PA    = 0x0,
-    UCT_IB_MLX5_MKC_ACCESS_MODE_MTT   = 0x1,
-    UCT_IB_MLX5_MKC_ACCESS_MODE_KLMS  = 0x2,
-    UCT_IB_MLX5_MKC_ACCESS_MODE_KSM   = 0x3,
-    UCT_IB_MLX5_MKC_ACCESS_MODE_MEMIC = 0x5
+    UCT_IB_MLX5_MKC_ACCESS_MODE_PA            = 0x0,
+    UCT_IB_MLX5_MKC_ACCESS_MODE_MTT           = 0x1,
+    UCT_IB_MLX5_MKC_ACCESS_MODE_KLMS          = 0x2,
+    UCT_IB_MLX5_MKC_ACCESS_MODE_KSM           = 0x3,
+    UCT_IB_MLX5_MKC_ACCESS_MODE_MEMIC         = 0x5,
+    UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA = 0x6
 };
 
 struct uct_ib_mlx5_mkc_bits {
@@ -636,7 +637,9 @@ struct uct_ib_mlx5_mkc_bits {
     uint8_t    free[0x1];
     uint8_t    reserved_at_2[0x1];
     uint8_t    access_mode_4_2[0x3];
-    uint8_t    reserved_at_6[0x7];
+    uint8_t    alter_pd_to_vhca_id[0x1];
+    uint8_t    crossed_side_mkey[0x1];
+    uint8_t    reserved_at_8[0x5];
     uint8_t    relaxed_ordering_write[0x1];
     uint8_t    reserved_at_e[0x1];
     uint8_t    small_fence_on_rdma_read_response[0x1];
@@ -669,9 +672,15 @@ struct uct_ib_mlx5_mkc_bits {
 
     uint8_t    bsf_octword_size[0x20];
 
-    uint8_t    reserved_at_120[0x80];
+    uint8_t    reserved_at_120[0x60];
 
-    uint8_t    translations_octword_size[0x20];
+    uint8_t    crossing_target_gvmi_id[0x10];
+    uint8_t    reserved_at_190[0x10];
+
+    union {
+        uint8_t translations_octword_size[0x20];
+        uint8_t crossing_target_mkey[0x20];
+    };
 
     uint8_t    reserved_at_1c0[0x1b];
     uint8_t    log_entity_size[0x5];
