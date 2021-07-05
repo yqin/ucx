@@ -322,7 +322,7 @@ typedef ucs_status_t (*uct_ib_md_get_atomic_mr_id_func_t)(uct_ib_md_t *md,
 /**
  * Memory domain method to register crossed mkey for memory area.
  *
- * @param [in] ib_md           Memory domain.
+ * @param [in] md              Memory domain.
  *
  * @param [in] address         Memory area start address (HOST).
  *
@@ -330,21 +330,34 @@ typedef ucs_status_t (*uct_ib_md_get_atomic_mr_id_func_t)(uct_ib_md_t *md,
  *
  * @param [in] allowed_gvmi_id Allowed GVMI ID (DPU).
  *
- * @param [out] ib_memh        Memory region handle.
+ * @param [out] memh           Memory region handle.
  *                             Method should initialize lkey & rkey.
  *
  * @return UCS_OK on success or error code in case of failure.
  */
-typedef ucs_status_t (*uct_ib_md_reg_crossed_key_func_t)(uct_ib_md_t *ib_md,
+typedef ucs_status_t (*uct_ib_md_reg_crossed_key_func_t)(uct_ib_md_t *md,
                                                          void *address,
                                                          size_t length,
                                                          uint32_t allowed_gvmi_id,
-                                                         uct_ib_mem_t *ib_memh);
+                                                         uct_ib_mem_t *memh);
+
+/*
+ * Memory domain method to release resources registered for crossed mkey.
+ *
+ * @param [in] md       Memory domain.
+ *
+ * @param [in] memh     Memory region handle registered with
+ *                      uct_ib_md_reg_crossed_key_func_t.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_dereg_crossed_key_func_t)(uct_ib_md_t *md,
+                                                           uct_ib_mem_t *memh);
 
 /**
  * Memory domain method to register crossing mkey for memory area.
  *
- * @param [in] ib_md          Memory domain.
+ * @param [in] md             Memory domain.
  *
  * @param [in] address        Memory area start address (HOST).
  *
@@ -354,17 +367,30 @@ typedef ucs_status_t (*uct_ib_md_reg_crossed_key_func_t)(uct_ib_md_t *ib_md,
  *
  * @param [in] target_mkey    Target mkey this mkey refers to (HOST).
  *
- * @param [out] ib_memh       Memory region handle.
+ * @param [out] memh          Memory region handle.
  *                            Method should initialize lkey and rkey.
  *
  * @return UCS_OK on success or error code in case of failure.
  */
-typedef ucs_status_t (*uct_ib_md_reg_crossing_key_func_t)(uct_ib_md_t *ib_md,
+typedef ucs_status_t (*uct_ib_md_reg_crossing_key_func_t)(uct_ib_md_t *md,
                                                           void *address,
                                                           size_t length,
                                                           uint32_t target_gvmi_id,
                                                           uint32_t target_mkey,
-                                                          uct_ib_mem_t *ib_memh);
+                                                          uct_ib_mem_t *memh);
+
+/*
+ * Memory domain method to release resources registered for crossing mkey.
+ *
+ * @param [in] md       Memory domain.
+ *
+ * @param [in] memh     Memory region handle registered with
+ *                      uct_ib_md_reg_crossing_key_func_t.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_dereg_crossing_key_func_t)(uct_ib_md_t *md,
+                                                            uct_ib_mem_t *memh);
 
 typedef struct uct_ib_md_ops {
     uct_ib_md_open_func_t                open;
@@ -378,7 +404,9 @@ typedef struct uct_ib_md_ops {
     uct_ib_md_mem_prefetch_func_t        mem_prefetch;
     uct_ib_md_get_atomic_mr_id_func_t    get_atomic_mr_id;
     uct_ib_md_reg_crossed_key_func_t     reg_crossed_key;
+    uct_ib_md_dereg_crossed_key_func_t   dereg_crossed_key;
     uct_ib_md_reg_crossing_key_func_t    reg_crossing_key;
+    uct_ib_md_dereg_crossing_key_func_t  dereg_crossing_key;
 } uct_ib_md_ops_t;
 
 

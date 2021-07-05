@@ -30,6 +30,8 @@ typedef struct uct_ib_mlx5_mem {
     uct_ib_mem_t               super;
 #if HAVE_DEVX
     struct mlx5dv_devx_obj     *atomic_dvmr;
+    struct mlx5dv_devx_obj     *crossed_dvmr;
+    struct mlx5dv_devx_obj     *crossing_dvmr;
 #endif
     uct_ib_mlx5_mr_t           mrs[];
 } uct_ib_mlx5_mem_t;
@@ -841,6 +843,12 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     void *mkc;
     ucs_status_t status;
 
+    // TODO: do we need to add UCT_IB_MLX5_MD_FLAG_CROSSED_MKEY similar to
+    //       UCT_IB_MLX5_MD_FLAG_DEVX to check supportability?
+    // if (!(md->flags & UCT_IB_MLX5_MD_FLAG_CROSSED_MKEY)) {
+    //     return UCS_OK;
+    // }
+
     // TODO: check if access flag needs to be 7, 0, UCT_IB_MEM_ACCESS_FLAGS
     mem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address, length,
                                UCT_IB_MEM_ACCESS_FLAGS);
@@ -878,9 +886,10 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
         ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
                   UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
         status = UCS_ERR_UNSUPPORTED;
-        goto err_free;
+        goto err_out;
     }
 
+    memh->crossed_dvmr = mr;
     memh->super.lkey =
         (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index) << 8) |
         ((intptr_t)address & 0xff);
@@ -888,11 +897,32 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
 
     status = UCS_OK;
 
-err_free:
-    mlx5dv_devx_umem_dereg(mem);
-
 err_out:
     return status;
+}
+
+static ucs_status_t
+uct_ib_mlx5_devx_dereg_crossed_key(uct_ib_md_t *ib_md, uct_ib_mem_t *ib_memh)
+{
+    //uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+    int rc;
+
+    // TODO: do we need to add UCT_IB_MLX5_MD_FLAG_CROSSED_MKEY similar to
+    //       UCT_IB_MLX5_MD_FLAG_DEVX to check supportability?
+    // if (!(md->flags & UCT_IB_MLX5_MD_FLAG_CROSSED_MKEY)) {
+    //     return UCS_OK;
+    // }
+
+    rc = mlx5dv_devx_obj_destroy(memh->crossed_dvmr);
+    if (rc != 0) {
+        ucs_error("mlx5dv_devx_obj_destroy() failed: %m");
+        return UCS_ERR_IO_ERROR;
+    }
+
+    // TODO: when deregister crossed mkey, also need to deregister crossing mkey
+
+    return UCS_OK;
 }
 
 static ucs_status_t
@@ -909,6 +939,12 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
     struct mlx5dv_devx_obj *mr;
     void *mkc;
     ucs_status_t status;
+
+    // TODO: do we need to add UCT_IB_MLX5_MD_FLAG_CROSSING_MKEY similar to
+    //       UCT_IB_MLX5_MD_FLAG_DEVX to check supportability?
+    // if (!(md->flags & UCT_IB_MLX5_MD_FLAG_CROSSING_MKEY)) {
+    //     return UCS_OK;
+    // }
 
     dv.pd.in = md->super.pd;
     dv.pd.out = &dvpd;
@@ -942,6 +978,7 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
         goto err_out;
     }
 
+    memh->crossing_dvmr = mr;
     memh->super.lkey =
         (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index) << 8) |
         ((intptr_t)address & 0xff);
@@ -951,6 +988,28 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
 
 err_out:
     return status;
+}
+
+static ucs_status_t
+uct_ib_mlx5_devx_dereg_crossing_key(uct_ib_md_t *ib_md, uct_ib_mem_t *ib_memh)
+{
+    //uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+    int rc;
+
+    // TODO: do we need to add UCT_IB_MLX5_MD_FLAG_CROSSING_MKEY similar to
+    //       UCT_IB_MLX5_MD_FLAG_DEVX to check supportability?
+    // if (!(md->flags & UCT_IB_MLX5_MD_FLAG_CROSSING_MKEY)) {
+    //     return UCS_OK;
+    // }
+
+    rc = mlx5dv_devx_obj_destroy(memh->crossing_dvmr);
+    if (rc != 0) {
+        ucs_error("mlx5dv_devx_obj_destroy() failed: %m");
+        return UCS_ERR_IO_ERROR;
+    }
+
+    return UCS_OK;
 }
 
 static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
@@ -965,7 +1024,9 @@ static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
     .get_atomic_mr_id    = uct_ib_mlx5_md_get_atomic_mr_id,
     .reg_crossed_key     = uct_ib_mlx5_devx_reg_crossed_key,
+    .dereg_crossed_key   = uct_ib_mlx5_devx_dereg_crossed_key,
     .reg_crossing_key    = uct_ib_mlx5_devx_reg_crossing_key,
+    .dereg_crossing_key  = uct_ib_mlx5_devx_dereg_crossing_key,
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_devx_md_ops, 2);
