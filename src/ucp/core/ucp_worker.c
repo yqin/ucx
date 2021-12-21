@@ -37,6 +37,7 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <time.h>
+#include <omp.h>
 
 
 #define UCP_WORKER_KEEPALIVE_ITER_SKIP 32
@@ -2651,6 +2652,7 @@ ucs_status_t ucp_worker_address_query(ucp_address_t *address,
     return UCS_OK;
 }
 
+#if 0
 unsigned ucp_worker_progress(ucp_worker_h worker)
 {
     unsigned count;
@@ -2672,6 +2674,34 @@ unsigned ucp_worker_progress(ucp_worker_h worker)
 
     return count;
 }
+#else
+extern int volatile start;
+#pragma weak start
+
+unsigned ucp_worker_progress(ucp_worker_h worker)
+{
+    unsigned count = 0;
+
+    if (start == 1 && omp_get_level() == 1) return count;
+
+    /* worker->inprogress is used only for assertion check.
+     * coverity[assert_side_effect]
+     */
+    UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(worker);
+
+    /* check that ucp_worker_progress is not called from within ucp_worker_progress */
+    ucs_assert(worker->inprogress++ == 0);
+    count = uct_worker_progress(worker->uct);
+    ucs_async_check_miss(&worker->async);
+
+    /* coverity[assert_side_effect] */
+    ucs_assert(--worker->inprogress == 0);
+
+    UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(worker);
+
+    return count;
+}
+#endif
 
 ssize_t ucp_stream_worker_poll(ucp_worker_h worker,
                                ucp_stream_poll_ep_t *poll_eps,
