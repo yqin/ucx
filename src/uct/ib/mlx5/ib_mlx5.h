@@ -181,9 +181,15 @@ enum {
     UCT_IB_MLX5_MD_FLAG_CQE_V1           = UCS_BIT(8),
     /* Device supports first fragment indication for MP XRQ */
     UCT_IB_MLX5_MD_FLAG_MP_XRQ_FIRST_MSG = UCS_BIT(9),
+    /* Device supports HCA CAP 2 */
+    UCT_IB_MLX5_MD_FLAG_HCA_CAP_2        = UCS_BIT(10),
+    /* Device supports Cross-GVMI target mkey */
+    UCT_IB_MLX5_MD_FLAG_CROSS_GVMI_TARGET= UCS_BIT(11),
+    /* Device supports Cross-GVMI alias mkey */
+    UCT_IB_MLX5_MD_FLAG_CROSS_GVMI_ALIAS = UCS_BIT(12),
 
     /* Object to be created by DevX */
-    UCT_IB_MLX5_MD_FLAG_DEVX_OBJS_SHIFT  = 10,
+    UCT_IB_MLX5_MD_FLAG_DEVX_OBJS_SHIFT  = 13,
     UCT_IB_MLX5_MD_FLAG_DEVX_RC_QP       = UCT_IB_MLX5_MD_FLAG_DEVX_OBJS(RCQP),
     UCT_IB_MLX5_MD_FLAG_DEVX_RC_SRQ      = UCT_IB_MLX5_MD_FLAG_DEVX_OBJS(RCSRQ),
     UCT_IB_MLX5_MD_FLAG_DEVX_DCT         = UCT_IB_MLX5_MD_FLAG_DEVX_OBJS(DCT),

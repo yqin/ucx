@@ -320,6 +320,83 @@ typedef ucs_status_t (*uct_ib_md_mem_prefetch_func_t)(uct_ib_md_t *md,
 typedef ucs_status_t (*uct_ib_md_get_atomic_mr_id_func_t)(uct_ib_md_t *md,
                                                           uint8_t *mr_id);
 
+/**
+ * Memory domain method to register cross-gvmi target memory key.
+ *
+ * @param [in] ib_md        Memory domain.
+ *
+ * @param [in] address      Memory area start address.
+ *
+ * @param [in] length       Memory area length.
+ *
+ * @param [in] token        Memory area access key.
+ *
+ * @param [in] token_len    Access key length.
+ *
+ * @param [in] ib_memh      Memory region handle.
+ *                          Method should initialize target_umem, target_dvmr,
+ *                          lkey, rkey.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_reg_target_key_func_t)(uct_ib_md_t *ib_md,
+                                                        void *address,
+                                                        size_t length,
+                                                        char *token,
+                                                        size_t token_len,
+                                                        uct_ib_mem_t *ib_memh);
+
+/**
+ * Memory domain method to deregister cross-gvmi target memory key.
+ *
+ * @param [in] ib_md        Memory domain.
+ *
+ * @param [in] ib_memh      Memory region handle registered with
+ *                          uct_ib_md_reg_target_key_func_t.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_dereg_target_key_func_t)(uct_ib_md_t *ib_md,
+                                                          uct_ib_mem_t *ib_memh);
+
+/**
+ * Memory domain method to register cross-gvmi alias memory key.
+ *
+ * @param [in] ib_md            Memory domain.
+ *
+ * @param [in] target_vhca_id   Target vHCA ID to cross to.
+ *
+ * @param [in] target_mkey      Target mkey to cross to.
+ *
+ * @param [in] token            Memory area access key.
+ *
+ * @param [in] token_len        Access key length.
+ *
+ * @param [in] ib_memh          Memory region handle.
+ *                              Method should initialize alias_dvmr, lkey, rkey.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_reg_alias_key_func_t)(uct_ib_md_t *ib_md,
+                                                       uint32_t target_vhca_id,
+                                                       uint32_t target_mkey,
+                                                       char *token,
+                                                       size_t token_len,
+                                                       uct_ib_mem_t *ib_memh);
+
+/**
+ * Memory domain method to deregister cross-gvmi alias memory key.
+ *
+ * @param [in] ib_md        Memory domain.
+ *
+ * @param [in] ib_memh      Memory region handle registered with
+ *                          uct_ib_md_reg_alias_key_func_t.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_dereg_alias_key_func_t)(uct_ib_md_t *ib_md,
+                                                         uct_ib_mem_t *ib_memh);
+
 typedef struct uct_ib_md_ops {
     uct_ib_md_open_func_t                open;
     uct_ib_md_cleanup_func_t             cleanup;
@@ -331,6 +408,10 @@ typedef struct uct_ib_md_ops {
     uct_ib_md_dereg_multithreaded_func_t dereg_multithreaded;
     uct_ib_md_mem_prefetch_func_t        mem_prefetch;
     uct_ib_md_get_atomic_mr_id_func_t    get_atomic_mr_id;
+    uct_ib_md_reg_target_key_func_t      reg_target_key;
+    uct_ib_md_dereg_target_key_func_t    dereg_target_key;
+    uct_ib_md_reg_alias_key_func_t       reg_alias_key;
+    uct_ib_md_dereg_alias_key_func_t     dereg_alias_key;
 } uct_ib_md_ops_t;
 
 
