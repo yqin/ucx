@@ -298,7 +298,8 @@ static ucs_status_t uct_ib_md_query(uct_md_h uct_md, uct_md_attr_t *md_attr)
                              UCT_MD_FLAG_NEED_MEMH |
                              UCT_MD_FLAG_NEED_RKEY |
                              UCT_MD_FLAG_ADVISE    |
-                             UCT_MD_FLAG_INVALIDATE;
+                             UCT_MD_FLAG_INVALIDATE |
+                             md->extra_cap_flags;
     md_attr->cap.alloc_mem_types  = 0;
     md_attr->cap.access_mem_types = UCS_BIT(UCS_MEMORY_TYPE_HOST);
     md_attr->cap.detect_mem_types = 0;
@@ -845,6 +846,50 @@ static ucs_status_t uct_ib_mem_dereg(uct_md_h uct_md,
     return status;
 }
 
+static ucs_status_t
+uct_ib_md_mem_reg_shared(uct_md_h uct_md, uct_md_mem_reg_shared_params_t *params,
+                         uct_mem_h *memh_p)
+{
+    uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_mem_t *ib_memh;
+    ucs_status_t status;
+
+    // return md->ops->mem_reg_shared(md, params, memh_p);
+    ib_memh = uct_ib_memh_alloc(md);
+    status = md->ops->reg_crossed_key(md, params->address, params->length,
+                                      params->dest_gvmi, ib_memh);
+    if (status != UCS_OK) {
+        uct_ib_memh_free(ib_memh);
+        return status;
+    }
+
+    *memh_p = ib_memh;
+    return UCS_OK;
+}
+
+static ucs_status_t
+uct_ib_md_import_shared_rkey(uct_md_h uct_md,
+                          uct_md_import_shared_rkey_params_t *params,
+                          uct_mem_h *memh_p)
+{
+    uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_mem_t *ib_memh;
+    ucs_status_t status;
+
+    // return md->ops->import_shared_rkey(md, params, memh_p);
+    ib_memh = uct_ib_memh_alloc(md);
+    status = md->ops->reg_crossing_key(md, NULL, 0, params->source_gvmi,
+                                       uct_ib_md_direct_rkey(params->rkey),
+                                       ib_memh);
+    if (status != UCS_OK) {
+        uct_ib_memh_free(ib_memh);
+        return status;
+    }
+
+    *memh_p = ib_memh;
+    return UCS_OK;
+}
+
 static ucs_status_t uct_ib_verbs_reg_key(uct_ib_md_t *md, void *address,
                                          size_t length, uint64_t access_flags,
                                          uct_ib_mem_t *ib_memh,
@@ -970,6 +1015,8 @@ static uct_md_ops_t uct_ib_md_ops = {
     .query              = uct_ib_md_query,
     .mem_reg            = uct_ib_mem_reg,
     .mem_dereg          = uct_ib_mem_dereg,
+    .mem_reg_shared     = uct_ib_md_mem_reg_shared,
+    .import_shared_rkey = uct_ib_md_import_shared_rkey,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
     .detect_memory_type = ucs_empty_function_return_unsupported,
@@ -1041,6 +1088,8 @@ static uct_md_ops_t uct_ib_md_rcache_ops = {
     .query                  = uct_ib_md_query,
     .mem_reg                = uct_ib_mem_rcache_reg,
     .mem_dereg              = uct_ib_mem_rcache_dereg,
+    .mem_reg_shared     = uct_ib_md_mem_reg_shared,
+    .import_shared_rkey = uct_ib_md_import_shared_rkey,
     .mem_advise             = uct_ib_mem_advise,
     .mkey_pack              = uct_ib_mkey_pack,
     .is_sockaddr_accessible = ucs_empty_function_return_zero_int,
@@ -1155,6 +1204,8 @@ static uct_md_ops_t UCS_V_UNUSED uct_ib_md_global_odp_ops = {
     .query              = uct_ib_md_odp_query,
     .mem_reg            = uct_ib_mem_global_odp_reg,
     .mem_dereg          = uct_ib_mem_global_odp_dereg,
+    .mem_reg_shared     = uct_ib_md_mem_reg_shared,
+    .import_shared_rkey = uct_ib_md_import_shared_rkey,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
     .detect_memory_type = ucs_empty_function_return_unsupported,

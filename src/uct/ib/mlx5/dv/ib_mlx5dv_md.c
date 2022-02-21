@@ -744,6 +744,16 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
         md->flags |= UCT_IB_MLX5_MD_FLAG_MP_XRQ_FIRST_MSG;
     }
 
+    if (UCT_IB_MLX5DV_GET(cmd_hca_cap, cap,
+                          crossing_vhca_mkey)) {
+        ucs_warn("%s: crossing_vhca_mkey is supported",
+                 uct_ib_device_name(dev));
+        md->super.extra_cap_flags |= UCT_MD_FLAG_SHARED_RKEY;
+    } else {
+        ucs_warn("%s: crossing_vhca_mkey is not supported",
+                 uct_ib_device_name(dev));
+    }
+
     status = uct_ib_mlx5_devx_check_odp(md, md_config, cap);
     if (status != UCS_OK) {
         goto err_free;

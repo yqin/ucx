@@ -136,6 +136,7 @@ typedef struct uct_ib_md {
     int                      fork_init;
     size_t                   memh_struct_size;
     uint64_t                 reg_mem_types;
+    uint64_t                 extra_cap_flags;
 } uct_ib_md_t;
 
 

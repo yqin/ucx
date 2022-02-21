@@ -384,9 +384,22 @@ struct uct_ib_mlx5_cmd_hca_cap_bits {
 
     uint8_t    reserved_at_500[0x20];
     uint8_t    num_of_uars_per_page[0x20];
-    uint8_t    reserved_at_540[0x40];
 
-    uint8_t    reserved_at_580[0x3d];
+    uint8_t    flex_parser_protocols[0x20];
+
+    uint8_t    reserved_at_560[0x13];
+    uint8_t    log_max_guaranteed_connections[0x5];
+    uint8_t    reserved_at_578[0x3];
+    uint8_t    log_max_dct_connections[0x5];
+
+    uint8_t    log_max_atomic_size_qp[0x8];
+    uint8_t    reserved_at_588[0x10];
+    uint8_t    log_max_atomic_size_dc[0x8];
+
+    uint8_t    reserved_at_5a0[0x12];
+    uint8_t    crossing_vhca_mkey[0x1];
+    uint8_t    reserved_at_5b3[0x9];
+    uint8_t    mini_cqe_resp_stride_index[0x1];
     uint8_t    cqe_128_always[0x1];
     uint8_t    cqe_compression_128[0x1];
     uint8_t    cqe_compression[0x1];

@@ -412,6 +412,27 @@ ucs_status_t uct_ep_query(uct_ep_h ep, uct_ep_attr_t *ep_attr);
 int uct_iface_is_reachable_v2(uct_iface_h iface,
                               const uct_iface_is_reachable_params_t *params);
 
+
+typedef struct {
+    void   *address;
+    size_t length;
+    int    dest_gvmi;
+} uct_md_mem_reg_shared_params_t;
+
+ucs_status_t uct_md_mem_reg_shared(uct_md_h md,
+                                   uct_md_mem_reg_shared_params_t *params,
+                                   uct_mem_h *memh_p);
+
+typedef struct {
+    int        source_gvmi;
+    uct_rkey_t rkey;
+} uct_md_import_shared_rkey_params_t;
+
+ucs_status_t
+uct_md_import_shared_rkey(uct_md_h md,
+                          uct_md_import_shared_rkey_params_t *params,
+                          uct_mem_h *memh_p);
+
 END_C_DECLS
 
 #endif
