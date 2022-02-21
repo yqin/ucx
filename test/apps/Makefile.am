@@ -21,7 +21,8 @@ noinst_PROGRAMS = \
 	test_link_map \
 	test_dlopen_cfg_print \
 	test_init_mt \
-	test_memtrack_limit
+	test_memtrack_limit \
+	test_uct_xgvmi
 
 objdir = $(shell sed -n -e 's/^objdir=\(.*\)$$/\1/p' $(LIBTOOL))
 
@@ -68,7 +69,7 @@ test_init_mt_LDADD    = $(top_builddir)/src/ucp/libucp.la
 test_uct_xgvmi_SOURCES  = test_uct_xgvmi.c
 test_uct_xgvmi_CPPFLAGS = $(BASE_CPPFLAGS)
 test_uct_xgvmi_CFLAGS   = $(BASE_CFLAGS)
-test_uct_xgvmi_LDADD    = $(top_builddir)/src/ucp/libuct.la
+test_uct_xgvmi_LDADD    = $(top_builddir)/src/uct/libuct.la
 
 
 if HAVE_CUDA
