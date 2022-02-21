@@ -693,7 +693,7 @@ enum {
                                                connection establishment via
                                                sockaddr */
     UCT_MD_FLAG_INVALIDATE = UCS_BIT(8),  /**< MD supports memory invalidation */
-    UCT_MD_FLAG_SHARED_RKEY = UCS_BIT(9), /**< MD supports shared remote keys */
+    UCT_MD_FLAG_SHARED_RKEY = UCS_BIT(9)  /**< MD supports shared remote keys */
 };
 
 /**

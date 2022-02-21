@@ -973,7 +973,7 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
     mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in, sizeof(in), out,
                                 sizeof(out));
     if (mr == NULL) {
-        ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+        ucs_fatal("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
                   UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
         status = UCS_ERR_UNSUPPORTED;
         goto err_out;
