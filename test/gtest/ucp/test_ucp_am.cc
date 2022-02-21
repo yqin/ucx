@@ -1314,7 +1314,7 @@ public:
         ASSERT_UCS_OK(ucp_rkey_pack(context, memh, &rkey_buf,
                     &rkey_buf_size));
 
-        ASSERT_UCS_OK(ucp_ep_rkey_unpack(sender().ep(), rkey_buf,
+        ASSERT_UCS_OK(ucp_worker_rkey_unpack(sender().worker(), rkey_buf,
                       &mparams.rkey));
 
         ucp_rkey_buffer_release(rkey_buf);

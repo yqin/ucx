@@ -3017,6 +3017,8 @@ void ucp_rkey_buffer_release(void *rkey_buffer);
 ucs_status_t ucp_ep_rkey_unpack(ucp_ep_h ep, const void *rkey_buffer,
                                 ucp_rkey_h *rkey_p);
 
+ucs_status_t ucp_worker_rkey_unpack(ucp_worker_h worker, const void *rkey_buffer,
+                                    ucp_rkey_h *rkey_p);
 
 /**
  * @ingroup UCP_MEM

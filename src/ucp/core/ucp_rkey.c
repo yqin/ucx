@@ -467,7 +467,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_ep_rkey_unpack_internal,
             goto err_destroy;
         }
     } else {
-        ucp_rkey_resolve_inner(rkey, ep);
+     //   ucp_rkey_resolve_inner(rkey, ep);
     }
 
     ucs_trace("ep %p: unpacked rkey %p md_map 0x%" PRIx64 " type %s", ep, rkey,
@@ -493,6 +493,128 @@ ucs_status_t ucp_ep_rkey_unpack(ucp_ep_h ep, const void *rkey_buffer,
     UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(ep->worker);
 
     return status;
+}
+
+ucs_status_t ucp_worker_rkey_unpack(ucp_worker_h worker, const void *buffer,
+                                     ucp_rkey_h *rkey_p)
+{
+    const void *p = buffer;
+    size_t length = 0;
+    ucp_md_map_t md_map, remote_md_map;
+    unsigned remote_md_index;
+    const void *tl_rkey_buf;
+    ucp_tl_rkey_t *tl_rkey;
+    size_t tl_rkey_size;
+    unsigned rkey_index;
+    ucs_status_t status;
+    ucp_rkey_h rkey;
+    uint8_t flags;
+    int md_count;
+    ucp_tl_md_t *tl_md;
+
+    UCS_STATIC_ASSERT(ucs_offsetof(ucp_rkey_t, mem_type) ==
+                      ucs_offsetof(ucp_rkey_t, cache.mem_type));
+    UCS_STATIC_ASSERT(ucs_same_type(ucs_field_type(ucp_rkey_t, mem_type),
+                                    ucs_field_type(ucp_rkey_t, cache.mem_type)));
+
+    ucs_trace("unpacking rkey buffer %p length %zu", buffer, length);
+    ucs_log_indent(1);
+
+    /* MD map for the unpacked rkey */
+    remote_md_map = *ucs_serialize_next(&p, const ucp_md_map_t);
+    md_map        = remote_md_map ;//& ucp_ep_config(ep)->key.reachable_md_map;
+    md_count      = ucs_popcount(md_map);
+
+    /* Allocate rkey handle which holds UCT rkeys for all remote MDs. Small key
+     * allocations are done from a memory pool.
+     * We keep all of them to handle a future transport switch.
+     */
+    if (md_count <= worker->context->config.ext.rkey_mpool_max_md) {
+        rkey  = ucs_mpool_get_inline(&worker->rkey_mp);
+        flags = UCP_RKEY_DESC_FLAG_POOL;
+    } else {
+        rkey  = ucs_malloc(sizeof(*rkey) + (sizeof(rkey->tl_rkey[0]) * md_count),
+                           "ucp_rkey");
+        flags = 0;
+    }
+    if (rkey == NULL) {
+        ucs_error("failed to allocate remote key");
+        status = UCS_ERR_NO_MEMORY;
+        goto out;
+    }
+
+    rkey->md_map   = md_map;
+    rkey->mem_type = *ucs_serialize_next(&p, const uint8_t);
+    rkey->peer_id  = *ucs_serialize_next(&p, ucp_rsc_index_t);
+    rkey->flags    = flags;
+#if 0
+    rkey->ep       = ep;
+#endif
+
+    /* Go over remote MD indices and unpack rkey of each UCT MD */
+    rkey_index = 0; /* Index of the rkey in the array */
+    ucs_for_each_bit(remote_md_index, remote_md_map) {
+        tl_rkey_size = *ucs_serialize_next(&p, const uint8_t);
+        tl_rkey_buf  = ucs_serialize_next_raw(&p, const void, tl_rkey_size);
+
+        /* Use bit operations to iterate through the indices of the remote MDs
+         * as provided in the md_map. md_map always holds a bitmap of MD indices
+         * that remain to be used. Every time we find the next valid MD index.
+         * If some rkeys cannot be unpacked, we remove them from the local map.
+         */
+        ucs_assert(UCS_BIT(remote_md_index) & remote_md_map);
+        ucs_assert_always(remote_md_index <= UCP_MD_INDEX_BITS);
+
+        /* Unpack only reachable rkeys */
+        if (!(UCS_BIT(remote_md_index) & rkey->md_map)) {
+            continue;
+        }
+
+        ucs_assert(rkey_index < md_count);
+        tl_rkey       = &rkey->tl_rkey[rkey_index];
+        tl_md         = &worker->context->tl_mds[remote_md_index];
+        tl_rkey->cmpt = worker->context->tl_cmpts[tl_md->cmpt_index].cmpt;
+
+        status = uct_rkey_unpack(tl_rkey->cmpt, tl_rkey_buf, &tl_rkey->rkey);
+        if (status == UCS_OK) {
+            ucs_trace("rkey[%d] for remote md %d is 0x%lx", rkey_index,
+                      remote_md_index, tl_rkey->rkey.rkey);
+            ++rkey_index;
+        } else if (status == UCS_ERR_UNREACHABLE) {
+            rkey->md_map &= ~UCS_BIT(remote_md_index);
+            ucs_trace("rkey[%d] for remote md %d is 0x%lx not reachable",
+                      rkey_index, remote_md_index, tl_rkey->rkey.rkey);
+        } else {
+            ucs_error("failed to unpack remote key from remote md[%d]: %s",
+                      remote_md_index, ucs_status_string(status));
+            goto err_destroy;
+        }
+    }
+
+#if 0
+    if (worker->context->config.ext.proto_enable) {
+        status = ucp_rkey_proto_resolve(rkey, ep, p,
+                                        UCS_PTR_BYTE_OFFSET(buffer, length));
+        if (status != UCS_OK) {
+            goto err_destroy;
+        }
+    } else {
+     //   ucp_rkey_resolve_inner(rkey, ep);
+    }
+#endif
+
+    ucs_trace("unpacked rkey %p md_map 0x%" PRIx64 " type %s", rkey,
+              rkey->md_map, ucs_memory_type_names[rkey->mem_type]);
+    *rkey_p = rkey;
+    status  = UCS_OK;
+    goto out;
+
+err_destroy:
+    ucp_rkey_destroy(rkey);
+out:
+    ucs_log_indent(-1);
+    return status;
+
 }
 
 void ucp_rkey_dump_packed(const void *buffer, size_t length,
