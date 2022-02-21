@@ -133,7 +133,7 @@ void ucp_mem_type_unreg_buffers(ucp_worker_h worker, ucs_memory_type_t mem_type,
 ucs_status_t ucp_memh_get_slow(ucp_context_h context, void *address,
                                size_t length, ucs_memory_type_t mem_type,
                                ucp_md_map_t reg_md_map, unsigned uct_flags,
-                               ucp_mem_h *memh_p);
+                               ucp_rsc_index_t peer_id, ucp_mem_h *memh_p);
 
 void ucp_memh_dereg(ucp_context_h context, ucp_mem_h memh, ucp_md_map_t md_map);
 

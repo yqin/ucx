@@ -1592,7 +1592,7 @@ typedef struct ucp_mem_map_params {
      ucs_memory_type_t      memory_type;
 
      /* Id of the peer to create a shared memh for */
-     uint32_t               peer_id;
+     uint8_t                peer_id;
 
      ucp_rkey_h             rkey;
 } ucp_mem_map_params_t;

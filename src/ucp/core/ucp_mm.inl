@@ -19,7 +19,8 @@ ucp_memh_is_zero_length(const ucp_mem_h memh)
 static UCS_F_ALWAYS_INLINE ucs_status_t
 ucp_memh_get(ucp_context_h context, void *address, size_t length,
              ucs_memory_type_t mem_type, ucp_md_map_t reg_md_map,
-             unsigned uct_flags, ucp_rkey_h rkey, ucp_mem_h *memh_p)
+             unsigned uct_flags, ucp_rkey_h rkey, ucp_rsc_index_t peer_id,
+             ucp_mem_h *memh_p)
 {
     ucs_rcache_region_t *rregion;
     ucs_status_t status;
@@ -32,18 +33,10 @@ ucp_memh_get(ucp_context_h context, void *address, size_t length,
 
     if (rkey_buffer != NULL) {
         /* Cache is not supported for shared mkeys */
-        memh = ucs_malloc(sizeof(*memh) + context->num_mds * sizeof(memh->uct[0]),
-                          "ucp_import_memh");
-        if (memh == NULL) {
-            return UCS_ERR_NO_MEMORY;
-        }
-
-        status = ucp_memh_import(context, rkey, address, length, memh);
+        status = ucp_memh_import(context, rkey, address, length, memh_p);
         if (status != UCS_OK) {
-            ucs_free(memh);
             return status;
         }
-        *memh_p = memh;
         return UCS_OK;
     }
 
@@ -65,7 +58,7 @@ ucp_memh_get(ucp_context_h context, void *address, size_t length,
     }
 
     return ucp_memh_get_slow(context, address, length, mem_type, reg_md_map,
-                             uct_flags, memh_p);
+                             uct_flags, peer_id, memh_p);
 }
 
 static UCS_F_ALWAYS_INLINE void
