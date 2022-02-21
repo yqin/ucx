@@ -1283,9 +1283,10 @@ public:
         return UCS_INPROGRESS;
     }
 
-    ucp_mem_h alloc_memhs(size_t length, ucp_mem_h *exp_memh, ucp_mem_h *imp_memh)
+    void* alloc_memhs(ucp_context_h context, size_t length,
+                      ucp_mem_h *exp_memh, ucp_mem_h *imp_memh)
     {
-        ucp_memh memh;
+        ucp_mem_h memh;
         ucp_mem_map_params_t mparams;
         mparams.field_mask  = UCP_MEM_MAP_PARAM_FIELD_LENGTH |
                               UCP_MEM_MAP_PARAM_FIELD_FLAGS;
@@ -1299,19 +1300,20 @@ public:
         attr.field_mask     = UCP_MEM_ATTR_FIELD_ADDRESS | UCP_MEM_ATTR_FIELD_LENGTH;
         ucs_status_t status = ucp_mem_query(memh, &attr);
         if (status != UCS_OK) {
-            ucp_mem_unmap(sender().ucph(), *memh_p);
-            ASSERT_TRUE(false);
+            ucp_mem_unmap(context, memh);
+            return NULL;
         }
-        ASSERT_GE(attr.length, length);
+        EXPECT_GE(attr.length, length);
         *exp_memh = memh;
 
         // Pack and unpack the key emulating that it is traversing thru the network
         void *rkey_buf;
         size_t rkey_buf_size;
-        ASSERT_UCS_OK(ucp_rkey_pack(sender().ucph(), memh, &rkey_buf,
+        ASSERT_UCS_OK(ucp_rkey_pack(context, memh, &rkey_buf,
                     &rkey_buf_size));
 
-        ASSERT_UCS_OK(ucp_rkey_unpack(sender().ep(), rkey_buf, &mparams.rkey));
+        ASSERT_UCS_OK(ucp_ep_rkey_unpack(sender().ep(), rkey_buf,
+                      &mparams.rkey));
 
         ucp_rkey_buffer_release(rkey_buf);
 
@@ -1320,7 +1322,7 @@ public:
                               UCP_MEM_MAP_PARAM_FIELD_RKEY;
         mparams.address     = attr.address;
         mparams.length      = attr.length;
-        ASSERT_UCS_OK(ucp_mem_map(sender().ucph(), &mparams, &memh));
+        ASSERT_UCS_OK(ucp_mem_map(context, &mparams, &memh));
 
         // Should be safe to destroy rkey now
         ucp_rkey_destroy(mparams.rkey);
@@ -1389,7 +1391,8 @@ public:
         EXPECT_UCS_OK(status);
         self->m_am_received = true;
 
-        free_memhs(receiver().ucp(), m_rx_memh, m_imp_memh);
+        self->free_memhs(self->receiver().ucph(),
+                         self->m_rx_memh, self->m_imp_memh);
     }
 
     static ucs_status_t am_data_rx_shared_mkey_rndv_cb(
@@ -1401,17 +1404,18 @@ public:
 
         EXPECT_FALSE(self->m_am_received);
 
-        void *address = allocate_imported_mkey(length, &m_rx_memh, &m_imp_memh);
+        void *address = self->alloc_memhs(self->receiver().ucph(), length,
+                                          &self->m_rx_memh, &self->m_imp_memh);
 
-        ucp_request_param_t param;
-        param.op_attr_mask    = UCP_OP_ATTR_FIELD_MEMH |
-                                UCP_OP_ATTR_FIELD_CALLBACK |
-                                UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
-        param.memh            = memh;
-        params.cb.recv_am     = am_data_recv_cb;
-        ucs_status_ptr_t rptr = ucp_am_recv_data_nbx(receiver().worker(),
-                                                     data_desc,
-                                                     address, length, &param);
+        ucp_request_param_t op_param;
+        op_param.op_attr_mask    = UCP_OP_ATTR_FIELD_MEMH |
+                                   UCP_OP_ATTR_FIELD_CALLBACK |
+                                   UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+        op_param.memh            = self->m_imp_memh;
+        op_param.cb.recv_am      = am_data_recv_cb;
+        ucs_status_ptr_t rptr    = ucp_am_recv_data_nbx(self->receiver().worker(),
+                                                        data, address, length,
+                                                        &op_param);
         ucp_request_release(rptr);
 
         return UCS_INPROGRESS;
@@ -1528,7 +1532,8 @@ UCS_TEST_P(test_ucp_am_nbx_rndv, shared_mkey)
     ucp_mem_h exp_memh, imp_memh;
     m_am_received = false;
     size_t length = 512 * UCS_KBYTE;
-    void *address = alloc_memhs(length, &exp_memh, &imp_memh);
+    void *address = alloc_memhs(sender().ucph(), length, &exp_memh, &imp_memh);
+    ASSERT_TRUE(address != NULL);
 
     ucp_request_param_t param;
     param.op_attr_mask    = UCP_OP_ATTR_FIELD_MEMH;

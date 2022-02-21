@@ -31,7 +31,7 @@ ucp_memh_get(ucp_context_h context, void *address, size_t length,
         return UCS_OK;
     }
 
-    if (rkey_buffer != NULL) {
+    if (rkey != NULL) {
         /* Cache is not supported for shared mkeys */
         status = ucp_memh_import(context, rkey, address, length, memh_p);
         if (status != UCS_OK) {

@@ -137,6 +137,9 @@ ucs_status_t ucp_memh_get_slow(ucp_context_h context, void *address,
 
 void ucp_memh_dereg(ucp_context_h context, ucp_mem_h memh, ucp_md_map_t md_map);
 
+ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
+                             void *address, size_t length, ucp_mem_h *memh_p);
+
 ucs_status_t ucp_mem_rcache_init(ucp_context_h context);
 
 void ucp_mem_rcache_cleanup(ucp_context_h context);

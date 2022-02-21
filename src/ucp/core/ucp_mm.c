@@ -274,7 +274,7 @@ ucp_mem_map_params2uct_flags(const ucp_mem_map_params_t *params)
         }
 
         if (params->flags & UCP_MEM_MAP_SHARED) {
-            flags |= UCT_MD_MEM_FLAG_SHARED_MEMH;
+            flags |= UCT_MD_FLAG_SHARED_RKEY;
         }
     }
 
@@ -316,7 +316,7 @@ static void ucp_memh_cleanup(ucp_context_h context, ucp_mem_h memh,
                              size_t length, ucp_md_index_t md_index,
                              unsigned uct_flags, ucs_status_t status)
 {
-    int shared_memh = uct_flags & UCT_MD_MEM_FLAG_SHARED_MEMH;
+    int shared_memh = uct_flags & UCT_MD_FLAG_SHARED_RKEY;
     ucs_log_level_t log_level;
 
     log_level = (uct_flags & UCT_MD_MEM_FLAG_HIDE_ERRORS) ?
@@ -335,9 +335,6 @@ static void ucp_memh_cleanup(ucp_context_h context, ucp_mem_h memh,
     } else {
         ucs_free(memh);
     }
-
-    return status;
-
 }
 
 static ucs_status_t ucp_memh_register(ucp_context_h context, ucp_mem_h memh,
@@ -347,15 +344,18 @@ static ucs_status_t ucp_memh_register(ucp_context_h context, ucp_mem_h memh,
     ucp_md_map_t md_map_registered                   = 0;
     uct_md_mem_reg_shared_params_t reg_shared_params = {};
     uct_md_attr_t *md_attr;
-    ucs_log_level_t log_level;
     ucp_md_index_t md_index;
     ucs_status_t status;
 
     ucs_for_each_bit(md_index, md_map) {
         md_attr = &context->tl_mds[md_index].attr;
 
-        if (uct_flags & UCT_MD_MEM_FLAG_SHARED_MEMH) {
+        if (uct_flags & UCT_MD_FLAG_SHARED_RKEY) {
             ucs_assert_always(memh->peer_id != UCP_NULL_RESOURCE);
+
+            if (!(md_attr->cap.flags & UCT_MD_FLAG_SHARED_RKEY)) {
+                continue;
+            }
             reg_shared_params.address   = address;
             reg_shared_params.length    = length;
             reg_shared_params.dest_gvmi = memh->peer_id;
@@ -418,7 +418,6 @@ ucp_memh_get_slow(ucp_context_h context, void *address, size_t length,
         memh->super.super.end   = (uintptr_t)reg_address + reg_length;
         memh->alloc_md_index    = UCP_NULL_RESOURCE;
         memh->alloc_method      = UCT_ALLOC_METHOD_LAST;
-        memh->flags             = 0;
     } else {
         status = ucs_rcache_get(context->rcache, reg_address, reg_length,
                                 PROT_READ|PROT_WRITE, NULL, &rregion);
@@ -480,7 +479,7 @@ ucp_memh_alloc(ucp_context_h context, void *address, size_t length,
                                    mem.mem_type, reg_md_map, uct_flags,
                                    peer_id, &memh);
     } else {
-        status = ucp_memh_import(context, rkey, address, length, memh);
+        status = ucp_memh_import(context, rkey, address, length, &memh);
     }
 
     if (status != UCS_OK) {
@@ -506,8 +505,8 @@ err:
     return status;
 }
 
-static ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
-                                    address, length, ucp_memh_h *memh_p)
+ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
+                             void *address, size_t length, ucp_mem_h *memh_p)
 {
     ucp_md_map_t md_map_registered = 0;
     uct_md_import_shared_rkey_params_t import_params = {};
@@ -527,8 +526,8 @@ static ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
     ucs_for_each_bit(md_index, rkey->md_map) {
         md_attr = &context->tl_mds[md_index].attr;
 
-        ucs_assert_always(md_attr->cap.flags & UCT_MD_FLAG_SHARED_MEMH);
-        import_params.rkey        = rkey->tl_rkey[md_index];
+        ucs_assert_always(md_attr->cap.flags & UCT_MD_FLAG_SHARED_RKEY);
+        import_params.rkey        = rkey->tl_rkey[md_index].rkey.rkey;
         import_params.source_gvmi = rkey->peer_id;
 
         status = uct_md_import_shared_rkey(context->tl_mds[md_index].md,
@@ -842,7 +841,7 @@ ucp_mpool_malloc(ucp_worker_h worker, ucs_mpool_t *mp, size_t *size_p, void **ch
     status = ucp_memh_alloc(worker->context, NULL,
                             *size_p + sizeof(*chunk_hdr), UCS_MEMORY_TYPE_HOST,
                             ucp_mem_map_params2uct_flags(&mem_params),
-                            ucs_mpool_name(mp), NULL, &memh);
+                            ucs_mpool_name(mp), NULL, UCP_NULL_RESOURCE, &memh);
     if (status != UCS_OK) {
         goto out;
     }
@@ -894,7 +893,7 @@ ucp_rndv_frag_malloc_mpools(ucs_mpool_t *mp, size_t *size_p, void **chunk_p)
     /* payload; need to get default flags from ucp_mem_map_params2uct_flags() */
     status = ucp_memh_alloc(context, NULL, frag_size * num_elems, mem_type,
                             UCT_MD_MEM_ACCESS_RMA, ucs_mpool_name(mp), NULL,
-                            &chunk_hdr->memh);
+                            UCP_NULL_RESOURCE, &chunk_hdr->memh);
     if (status != UCS_OK) {
         return status;
     }
@@ -967,7 +966,7 @@ ucp_mm_get_alloc_md_map(ucp_context_h context, ucp_md_map_t *md_map_p)
         /* Allocate dummy 1-byte buffer to get the expected md_map */
         status = ucp_memh_alloc(context, NULL, 1, UCS_MEMORY_TYPE_HOST,
                                 UCT_MD_MEM_ACCESS_ALL, "get_alloc_md_map",
-                                NULL, &memh);
+                                NULL, UCP_NULL_RESOURCE, &memh);
         if (status != UCS_OK) {
             goto out;
         }
