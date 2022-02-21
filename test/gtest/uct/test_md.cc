@@ -754,6 +754,50 @@ UCS_TEST_SKIP_COND_P(test_md, dereg_bad_arg,
     free(ptr);
 }
 
+// TODO check MD cap flag
+UCS_TEST_P(test_md, shared_rkey)
+{
+    static const size_t size = 1 * UCS_MBYTE;
+    ucs_status_t status;
+    uct_mem_h memh;
+    void *ptr;
+
+    int ret = ucs_posix_memalign(&ptr, ucs_get_page_size(), size, "shared_buf");
+    ASSERT_EQ(0, ret);
+
+    uct_md_mem_reg_shared_params_t reg_shared_params;
+    reg_shared_params.address = ptr;
+    reg_shared_params.length  = size;
+    reg_shared_params.dest_gvmi = 0;
+
+    status = uct_md_mem_reg_shared(md(), &reg_shared_params, &memh);
+    ASSERT_UCS_OK(status);
+
+    UCS_TEST_MESSAGE << "registered shared memh";
+
+    std::vector<uint8_t> rkey_buf;
+    rkey_buf.resize(md_attr().rkey_packed_size);
+
+    status = uct_md_mkey_pack(md(), memh, &rkey_buf[0]);
+    ASSERT_UCS_OK(status);
+
+    uct_rkey_bundle_t rkey_bundle;
+    status = uct_rkey_unpack(GetParam().component, &rkey_buf[0], &rkey_bundle);
+    ASSERT_UCS_OK(status);
+
+    UCS_TEST_MESSAGE << "unpacked rkey";
+
+    uct_md_import_shared_rkey_params_t import_params;
+    import_params.rkey = rkey_bundle.rkey;
+    import_params.source_gvmi = 0; // TODO
+
+    uct_mem_h imported_memh;
+    status = uct_md_import_shared_rkey(md(), &import_params, &imported_memh);
+    ASSERT_UCS_OK(status);
+
+    UCS_TEST_MESSAGE << "registered imported memh";
+}
+
 UCT_MD_INSTANTIATE_TEST_CASE(test_md)
 
 class test_md_fork : private ucs::clear_dontcopy_regions, public test_md {

@@ -621,6 +621,7 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
     struct ibv_context *ctx;
     uct_ib_device_t *dev;
     uct_ib_mlx5_md_t *md;
+    int vhca_id;
     void *cap;
     int ret;
 
@@ -744,14 +745,21 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
         md->flags |= UCT_IB_MLX5_MD_FLAG_MP_XRQ_FIRST_MSG;
     }
 
+    vhca_id = UCT_IB_MLX5DV_GET(cmd_hca_cap, cap, vhca_id);
+    // ucs_warn("%s: vhca_id is %d. at b4h: 0x%x; 0x%x", uct_ib_device_name(dev),
+    //          UCT_IB_MLX5DV_GET(cmd_hca_cap, cap, vhca_id),
+    //          ntohl(*(uint32_t*)UCS_PTR_BYTE_OFFSET(cap, 0xB4)),
+    //          ntohl(*(uint32_t*)UCS_PTR_BYTE_OFFSET(cap, 0xB4)) & (1<<13)
+    //          );
+
     if (UCT_IB_MLX5DV_GET(cmd_hca_cap, cap,
                           crossing_vhca_mkey)) {
-        ucs_warn("%s: crossing_vhca_mkey is supported",
-                 uct_ib_device_name(dev));
+        ucs_print("%s: vhca_id=%d crossing_vhca_mkey is supported",
+                 uct_ib_device_name(dev), vhca_id);
         md->super.extra_cap_flags |= UCT_MD_FLAG_SHARED_RKEY;
     } else {
-        ucs_warn("%s: crossing_vhca_mkey is not supported",
-                 uct_ib_device_name(dev));
+        ucs_print("%s: vhca_id=%d crossing_vhca_mkey is not supported",
+                 uct_ib_device_name(dev), vhca_id);
     }
 
     status = uct_ib_mlx5_devx_check_odp(md, md_config, cap);
@@ -869,8 +877,10 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     ucs_status_t status;
 
     // TODO: check if access flag needs to be 7, 0, UCT_IB_MEM_ACCESS_FLAGS
+    ucs_warn("ume_reg crosses address=%p length=%zu", address, length);
     mem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address, length,
-                               UCT_IB_MEM_ACCESS_FLAGS);
+                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                                       IBV_ACCESS_REMOTE_WRITE);
     if (mem == NULL) {
         ucs_error("mlx5dv_devx_umem_reg() failed: %m");
         status = UCS_ERR_NO_MEMORY;
