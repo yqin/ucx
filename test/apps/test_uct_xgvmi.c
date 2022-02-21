@@ -30,6 +30,7 @@ typedef struct {
     const char *md_name;
     int        gvmi_id;
     size_t     size;
+    size_t     align;
     uint32_t   mkey;
 } cmd_args_t;
 
@@ -108,7 +109,7 @@ void do_export(uct_md_h md, uct_component_h component,
     void *ptr;
     int ret;
 
-    ret = posix_memalign(&ptr, 65536, cmd_args->size);
+    ret = posix_memalign(&ptr, cmd_args->align, cmd_args->size);
     CHKERR_JUMP(0 != ret, "allocate memory", error_ret);
 
     reg_shared_params.address   = ptr;
@@ -124,8 +125,8 @@ void do_export(uct_md_h md, uct_component_h component,
     status = uct_rkey_unpack(component, rkey_buf, &rkey_bundle);
     CHKERR_JUMP(UCS_OK != status, "uct_rkey_unpack", error_ret);
 
-    printf("shared rkey 0x%x for gvmi %d\n", (uint32_t)rkey_bundle.rkey,
-           cmd_args->gvmi_id);
+    printf("shared ptr %p len %zu rkey 0x%x towards gvmi %d\n", ptr,
+           cmd_args->size, (uint32_t)rkey_bundle.rkey, cmd_args->gvmi_id);
     printf("press any key to continue\n");
     getchar();
 
@@ -168,8 +169,9 @@ int main(int argc, char** argv)
     args.gvmi_id = 0;
     args.mkey    = 0;
     args.size    = 1024 * 1024;
+    args.align   = 65536;
 
-    while ((c = getopt(argc, argv, "d:g:i:")) != -1) {
+    while ((c = getopt(argc, argv, "d:g:i:s:a:")) != -1) {
         switch (c) {
         case 'd':
             args.md_name = optarg;
@@ -180,8 +182,14 @@ int main(int argc, char** argv)
         case 'i':
             args.mkey = strtol(optarg, NULL, 0);
             break;
+        case 's':
+            args.size = strtoll(optarg, NULL, 0);
+            break;
+        case 'a':
+            args.align = strtoll(optarg, NULL, 0);
+            break;
         default:
-            printf("Usage: %s [-d <md_name>] [-g <gvmi_id>] [-i <mkey>]\n",
+            printf("Usage: %s [-d <md_name>] [-g <gvmi_id>] [-i <mkey>] [ -s size ] [ -a align ]\n",
                    argv[0]);
             return -1;
         }
