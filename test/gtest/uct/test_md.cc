@@ -753,7 +753,9 @@ UCS_TEST_SKIP_COND_P(test_md, dereg_bad_arg,
     EXPECT_UCS_OK(status);
     free(ptr);
 }
-
+extern "C"  {
+#include <uct/ib/base/ib_md.h>
+}
 // TODO check MD cap flag
 UCS_TEST_P(test_md, shared_rkey)
 {
@@ -765,10 +767,12 @@ UCS_TEST_P(test_md, shared_rkey)
     int ret = ucs_posix_memalign(&ptr, ucs_get_page_size(), size, "shared_buf");
     ASSERT_EQ(0, ret);
 
+    int vhca_id = ((uct_ib_md_t*)md())->vhca_id;
+
     uct_md_mem_reg_shared_params_t reg_shared_params;
     reg_shared_params.address = ptr;
     reg_shared_params.length  = size;
-    reg_shared_params.dest_gvmi = 0;
+    reg_shared_params.dest_gvmi = vhca_id;
 
     status = uct_md_mem_reg_shared(md(), &reg_shared_params, &memh);
     ASSERT_UCS_OK(status);
@@ -789,7 +793,7 @@ UCS_TEST_P(test_md, shared_rkey)
 
     uct_md_import_shared_rkey_params_t import_params;
     import_params.rkey = rkey_bundle.rkey;
-    import_params.source_gvmi = 0; // TODO
+    import_params.source_gvmi = vhca_id; // TODO
 
     uct_mem_h imported_memh;
     status = uct_md_import_shared_rkey(md(), &import_params, &imported_memh);

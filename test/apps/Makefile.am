@@ -64,6 +64,13 @@ test_init_mt_CPPFLAGS = $(BASE_CPPFLAGS)
 test_init_mt_CFLAGS   = $(BASE_CFLAGS) $(OPENMP_CFLAGS)
 test_init_mt_LDADD    = $(top_builddir)/src/ucp/libucp.la
 
+
+test_uct_xgvmi_SOURCES  = test_uct_xgvmi.c
+test_uct_xgvmi_CPPFLAGS = $(BASE_CPPFLAGS)
+test_uct_xgvmi_CFLAGS   = $(BASE_CFLAGS)
+test_uct_xgvmi_LDADD    = $(top_builddir)/src/ucp/libuct.la
+
+
 if HAVE_CUDA
 noinst_PROGRAMS                += test_cuda_hook_dynamic
 

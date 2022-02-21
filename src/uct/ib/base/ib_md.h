@@ -137,6 +137,7 @@ typedef struct uct_ib_md {
     size_t                   memh_struct_size;
     uint64_t                 reg_mem_types;
     uint64_t                 extra_cap_flags;
+    int                      vhca_id;
 } uct_ib_md_t;
 
 
