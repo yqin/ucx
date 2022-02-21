@@ -130,6 +130,14 @@ void do_export(uct_md_h md, uct_component_h component,
     printf("press any key to continue\n");
     getchar();
 
+    status = uct_rkey_release(component, &rkey_bundle);
+    CHKERR_JUMP(UCS_OK != status, "uct_rkey_release", error_ret);
+
+    status = uct_md_mem_dereg(md, memh);
+    CHKERR_JUMP(UCS_OK != status, "uct_md_mem_dereg", error_ret);
+
+    free(ptr);
+
 error_ret:
     ;
 }
@@ -151,6 +159,9 @@ void do_import(uct_md_h md, uct_component_h component,
     CHKERR_JUMP(UCS_OK != status, "uct_md_import_shared_rkey", error_ret);
 
     printf("imported shared rkey memh=%p\n", memh);
+
+    status = uct_md_mem_dereg(md, memh);
+    CHKERR_JUMP(UCS_OK != status, "uct_md_mem_dereg", error_ret);
 
 error_ret:
     ;

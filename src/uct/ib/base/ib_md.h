@@ -54,6 +54,7 @@ enum {
     UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4), /**< The memory region will issue
                                                         PCIe writes with relaxed order
                                                         attribute */
+    UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(5)
 };
 
 enum {

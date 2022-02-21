@@ -26,10 +26,19 @@ typedef union uct_ib_mlx5_mr {
     uct_ib_mlx5_ksm_data_t     *ksm_data;
 } uct_ib_mlx5_mr_t;
 
+typedef enum {
+    UCT_IB_MLX5_MEM_REG,
+    UCT_IB_MLX5_MEM_CROSSED,
+    UCT_IB_MLX5_MEM_CROSSING
+} uct_ib_mlx5_mem_type_t;
+
 typedef struct uct_ib_mlx5_mem {
     uct_ib_mem_t               super;
+    uct_ib_mlx5_mem_type_t     type;
 #if HAVE_DEVX
     struct mlx5dv_devx_obj     *atomic_dvmr;
+    struct mlx5dv_devx_umem    *umem;
+    struct mlx5dv_devx_obj     *cross_mr;
 #endif
     uct_ib_mlx5_mr_t           mrs[];
 } uct_ib_mlx5_mem_t;
@@ -43,6 +52,9 @@ static ucs_status_t uct_ib_mlx5_reg_key(uct_ib_md_t *md, void *address,
 {
     uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
 
+    memh->type = UCT_IB_MLX5_MEM_REG;
+
+    ucs_print("reg key %p type %d", memh, mr_type);
     return uct_ib_reg_key_impl(md, address, length, access_flags, ib_memh,
                                &memh->mrs[mr_type].super, mr_type, silent);
 }
@@ -52,8 +64,41 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
                                           uct_ib_mr_type_t mr_type)
 {
     uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+    int ret;
 
-    return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
+    ucs_print("de-reg key %p type %d", memh, mr_type);
+    switch (memh->type) {
+    case UCT_IB_MLX5_MEM_REG:
+        return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
+    case UCT_IB_MLX5_MEM_CROSSED:
+        if (mr_type != UCT_IB_MR_DEFAULT) {
+            return UCS_OK;
+        }
+        ret = mlx5dv_devx_obj_destroy(memh->cross_mr);
+        if (ret < 0) {
+            ucs_warn("mlx5dv_devx_obj_destroy(crossmr) failed: %m");
+            return UCS_ERR_IO_ERROR;
+        }
+
+        ret = mlx5dv_devx_umem_dereg(memh->umem);
+        if (ret < 0) {
+            ucs_warn("mlx5dv_devx_umem_dereg(crossmr) failed: %m");
+            return UCS_ERR_IO_ERROR;
+        }
+        return UCS_OK;
+    case UCT_IB_MLX5_MEM_CROSSING:
+        if (mr_type != UCT_IB_MR_DEFAULT) {
+            return UCS_OK;
+        }
+        ret = mlx5dv_devx_obj_destroy(memh->cross_mr);
+        if (ret < 0) {
+            ucs_warn("mlx5dv_devx_obj_destroy(crossmr) failed: %m");
+            return UCS_ERR_IO_ERROR;
+        }
+        return UCS_OK;
+    default:
+        return UCS_ERR_INVALID_PARAM;
+    }
 }
 
 static ucs_status_t uct_ib_mlx5_reg_atomic_key(uct_ib_md_t *ibmd,
@@ -872,16 +917,19 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
     char in[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_in)] = {0};
     char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_out)] = {0};
-    struct mlx5dv_devx_umem *mem;
-    struct mlx5dv_devx_obj *mr;
     void *mkc;
     ucs_status_t status;
 
+    ucs_print("reg key %p crossed", memh);
+
+    memh->type = UCT_IB_MLX5_MEM_CROSSED;
+
     ucs_print("umr_reg crosses address=%p length=%zu", address, length);
-    mem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address, length,
-                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                                       IBV_ACCESS_REMOTE_WRITE);
-    if (mem == NULL) {
+    memh->umem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address, length,
+                                     IBV_ACCESS_LOCAL_WRITE |
+                                             IBV_ACCESS_REMOTE_READ |
+                                             IBV_ACCESS_REMOTE_WRITE);
+    if (memh->umem == NULL) {
         ucs_error("mlx5dv_devx_umem_reg() failed: %m");
         status = UCS_ERR_NO_MEMORY;
         goto err_out;
@@ -892,7 +940,7 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     UCT_IB_MLX5DV_SET(create_mkey_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_MKEY);
     UCT_IB_MLX5DV_SET(create_mkey_in, in, pg_access, 1);
     UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_valid, 1);
-    UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_id, mem->umem_id);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_id, memh->umem->umem_id);
     UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_1_0, UCT_IB_MLX5_MKC_ACCESS_MODE_MTT);
     UCT_IB_MLX5DV_SET(mkc, mkc, a, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, rw, 1);
@@ -909,9 +957,9 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (intptr_t)address);
     UCT_IB_MLX5DV_SET64(mkc, mkc, len, length);
 
-    mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in, sizeof(in), out,
-                                sizeof(out));
-    if (mr == NULL) {
+    memh->cross_mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in,
+                                            sizeof(in), out, sizeof(out));
+    if (memh->cross_mr == NULL) {
         ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
                   UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
         status = UCS_ERR_UNSUPPORTED;
@@ -928,7 +976,7 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     status = UCS_OK;
 
 err_free:
-    mlx5dv_devx_umem_dereg(mem);
+    mlx5dv_devx_umem_dereg(memh->umem);
 
 err_out:
     return status;
@@ -944,9 +992,11 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, uint32_t target_gvmi_id,
     char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_out)] = {0};
     struct mlx5dv_pd dvpd = {};
     struct mlx5dv_obj dv  = {};
-    struct mlx5dv_devx_obj *mr;
     void *mkc;
     ucs_status_t status;
+
+    ucs_print("reg key %p crossing", memh);
+    memh->type = UCT_IB_MLX5_MEM_CROSSING;
 
     dv.pd.in = md->super.pd;
     dv.pd.out = &dvpd;
@@ -975,10 +1025,10 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, uint32_t target_gvmi_id,
     UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (intptr_t)0);
     UCT_IB_MLX5DV_SET(mkc, mkc, length64, 1);
 
-    mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in, sizeof(in), out,
-                                sizeof(out));
-    if (mr == NULL) {
-        ucs_fatal("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+    memh->cross_mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in,
+                                            sizeof(in), out, sizeof(out));
+    if (memh->cross_mr == NULL) {
+        ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
                   UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
         status = UCS_ERR_UNSUPPORTED;
         goto err_out;
@@ -1220,6 +1270,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_md_ops = {
     .dereg_multithreaded = (uct_ib_md_dereg_multithreaded_func_t)ucs_empty_function_return_unsupported,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
     .get_atomic_mr_id    = (uct_ib_md_get_atomic_mr_id_func_t)ucs_empty_function_return_unsupported,
+    .reg_crossed_key     = uct_ib_mlx5_devx_reg_crossed_key,
+    .reg_crossing_key    = uct_ib_mlx5_devx_reg_crossing_key,
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_md_ops, 1);
