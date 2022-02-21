@@ -100,6 +100,15 @@ typedef ucs_status_t
 (*uct_md_mem_dereg_func_t)(uct_md_h md,
                            const uct_md_mem_dereg_params_t *param);
 
+
+typedef ucs_status_t (*uct_md_mem_reg_shared_func_t)(
+        uct_md_h md, uct_md_mem_reg_shared_params_t *params, uct_mem_h *memh_p);
+
+
+typedef ucs_status_t (*uct_md_import_shared_rkey_func_t)(
+        uct_md_h md, uct_md_import_shared_rkey_params_t *params, uct_mem_h *memh_p);
+
+
 typedef ucs_status_t (*uct_md_mem_query_func_t)(uct_md_h md,
                                                 const void *address,
                                                 size_t length,
@@ -129,6 +138,8 @@ struct uct_md_ops {
     uct_md_mem_advise_func_t             mem_advise;
     uct_md_mem_reg_func_t                mem_reg;
     uct_md_mem_dereg_func_t              mem_dereg;
+    uct_md_mem_reg_shared_func_t         mem_reg_shared;
+    uct_md_import_shared_rkey_func_t     import_shared_rkey;
     uct_md_mem_query_func_t              mem_query;
     uct_md_mkey_pack_func_t              mkey_pack;
     uct_md_is_sockaddr_accessible_func_t is_sockaddr_accessible;

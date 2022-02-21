@@ -744,6 +744,23 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
         md->flags |= UCT_IB_MLX5_MD_FLAG_MP_XRQ_FIRST_MSG;
     }
 
+    md->super.vhca_id = UCT_IB_MLX5DV_GET(cmd_hca_cap, cap, vhca_id);
+    // ucs_warn("%s: vhca_id is %d. at b4h: 0x%x; 0x%x", uct_ib_device_name(dev),
+    //          UCT_IB_MLX5DV_GET(cmd_hca_cap, cap, vhca_id),
+    //          ntohl(*(uint32_t*)UCS_PTR_BYTE_OFFSET(cap, 0xB4)),
+    //          ntohl(*(uint32_t*)UCS_PTR_BYTE_OFFSET(cap, 0xB4)) & (1<<13)
+    //          );
+
+    if (UCT_IB_MLX5DV_GET(cmd_hca_cap, cap,
+                          crossing_vhca_mkey)) {
+        ucs_info("%s: vhca_id=%d crossing_vhca_mkey is supported",
+                 uct_ib_device_name(dev), md->super.vhca_id);
+        md->super.extra_cap_flags |= UCT_MD_FLAG_SHARED_RKEY;
+    } else {
+        ucs_info("%s: vhca_id=%d crossing_vhca_mkey is not supported",
+                 uct_ib_device_name(dev), md->super.vhca_id);
+    }
+
     status = uct_ib_mlx5_devx_check_odp(md, md_config, cap);
     if (status != UCS_OK) {
         goto err_free;
@@ -844,6 +861,139 @@ static void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
     ucs_recursive_spinlock_destroy(&md->dbrec_lock);
 }
 
+static ucs_status_t
+uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
+                                 size_t length, uint32_t allowed_gvmi_id,
+                                 uct_ib_mem_t *ib_memh)
+{
+    uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_in)] = {0};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_out)] = {0};
+    struct mlx5dv_devx_umem *mem;
+    struct mlx5dv_devx_obj *mr;
+    void *mkc;
+    ucs_status_t status;
+
+    ucs_print("umr_reg crosses address=%p length=%zu", address, length);
+    mem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address, length,
+                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                                       IBV_ACCESS_REMOTE_WRITE);
+    if (mem == NULL) {
+        ucs_error("mlx5dv_devx_umem_reg() failed: %m");
+        status = UCS_ERR_NO_MEMORY;
+        goto err_out;
+    }
+
+    mkc = UCT_IB_MLX5DV_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
+
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_MKEY);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, pg_access, 1);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_valid, 1);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_id, mem->umem_id);
+    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_1_0, UCT_IB_MLX5_MKC_ACCESS_MODE_MTT);
+    UCT_IB_MLX5DV_SET(mkc, mkc, a, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, rw, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, rr, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, lw, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, lr, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, translations_octword_size, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, log_entity_size, 12);
+    UCT_IB_MLX5DV_SET(mkc, mkc, qpn, 0xffffff);
+    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, (intptr_t)address & 0xff);
+    UCT_IB_MLX5DV_SET(mkc, mkc, alter_pd_to_vhca_id, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossed_side_mkey, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_gvmi_id, allowed_gvmi_id);
+    UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (intptr_t)address);
+    UCT_IB_MLX5DV_SET64(mkc, mkc, len, length);
+
+    mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in, sizeof(in), out,
+                                sizeof(out));
+    if (mr == NULL) {
+        ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+                  UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
+        status = UCS_ERR_UNSUPPORTED;
+        goto err_free;
+    }
+
+    memh->super.lkey =
+        (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index) << 8) |
+        ((intptr_t)address & 0xff);
+    memh->super.rkey = memh->super.lkey;
+
+    ucs_print("crossed mkey is %x", memh->super.lkey);
+
+    status = UCS_OK;
+
+err_free:
+    mlx5dv_devx_umem_dereg(mem);
+
+err_out:
+    return status;
+}
+
+static ucs_status_t
+uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
+                                  size_t length, uint32_t target_gvmi_id,
+                                  uint32_t target_mkey, uct_ib_mem_t *ib_memh)
+{
+    uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_in)] = {0};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_out)] = {0};
+    struct mlx5dv_pd dvpd = {};
+    struct mlx5dv_obj dv  = {};
+    struct mlx5dv_devx_obj *mr;
+    void *mkc;
+    ucs_status_t status;
+
+    dv.pd.in = md->super.pd;
+    dv.pd.out = &dvpd;
+    mlx5dv_init_obj(&dv, MLX5DV_OBJ_PD);
+
+    ucs_print("reg_crossin address=%p", address);
+
+    mkc = UCT_IB_MLX5DV_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
+
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_MKEY);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, translations_octword_actual_size, 0);
+    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_1_0, UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA & 0x3);
+    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_4_2, (UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA & 0x1C) >> 2);
+    UCT_IB_MLX5DV_SET(mkc, mkc, a, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, rw, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, rr, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, lw, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, lr, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, pd, dvpd.pdn);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_gvmi_id, target_gvmi_id);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_mkey, target_mkey);
+    UCT_IB_MLX5DV_SET(mkc, mkc, qpn, 0xffffff);
+    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, (intptr_t)address & 0xff);
+    UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (intptr_t)0);
+    UCT_IB_MLX5DV_SET(mkc, mkc, length64, 1);
+
+    mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in, sizeof(in), out,
+                                sizeof(out));
+    if (mr == NULL) {
+        ucs_fatal("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+                  UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
+        status = UCS_ERR_UNSUPPORTED;
+        goto err_out;
+    }
+
+    memh->super.lkey =
+        (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index) << 8) |
+        ((intptr_t)address & 0xff);
+    memh->super.rkey = memh->super.lkey;
+
+    ucs_print("crossing mkey is %x", memh->super.lkey);
+
+    status = UCS_OK;
+
+err_out:
+    return status;
+}
+
 static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .open                = uct_ib_mlx5_devx_md_open,
     .cleanup             = uct_ib_mlx5_devx_md_cleanup,
@@ -855,6 +1005,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .dereg_multithreaded = uct_ib_mlx5_devx_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
     .get_atomic_mr_id    = uct_ib_mlx5_md_get_atomic_mr_id,
+    .reg_crossed_key     = uct_ib_mlx5_devx_reg_crossed_key,
+    .reg_crossing_key    = uct_ib_mlx5_devx_reg_crossing_key,
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_devx_md_ops, 2);

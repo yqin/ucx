@@ -468,6 +468,21 @@ ucs_status_t uct_md_mem_dereg_v2(uct_md_h md,
     return md->ops->mem_dereg(md, params);
 }
 
+ucs_status_t uct_md_mem_reg_shared(uct_md_h md,
+                                   uct_md_mem_reg_shared_params_t *params,
+                                   uct_mem_h *memh_p)
+{
+    return md->ops->mem_reg_shared(md, params, memh_p);
+}
+
+ucs_status_t
+uct_md_import_shared_rkey(uct_md_h md,
+                          uct_md_import_shared_rkey_params_t *params,
+                          uct_mem_h *memh_p)
+{
+    return md->ops->import_shared_rkey(md, params, memh_p);
+}
+
 ucs_status_t uct_md_mem_query(uct_md_h md, const void *address, size_t length,
                               uct_md_mem_attr_t *mem_attr)
 {
