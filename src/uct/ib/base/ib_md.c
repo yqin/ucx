@@ -863,6 +863,7 @@ uct_ib_md_mem_reg_shared(uct_md_h uct_md, uct_md_mem_reg_shared_params_t *params
         return status;
     }
 
+    ib_memh->flags |= UCT_IB_MEM_FLAG_NO_RCACHE;
     *memh_p = ib_memh;
     return UCS_OK;
 }
@@ -886,6 +887,7 @@ uct_ib_md_import_shared_rkey(uct_md_h uct_md,
         return status;
     }
 
+    ib_memh->flags |= UCT_IB_MEM_FLAG_NO_RCACHE;
     *memh_p = ib_memh;
     return UCS_OK;
 }
@@ -1066,10 +1068,15 @@ static ucs_status_t
 uct_ib_mem_rcache_dereg(uct_md_h uct_md,
                         const uct_md_mem_dereg_params_t *params)
 {
-    uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_md_t *md       = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_mem_t *ib_memh = (uct_ib_mem_t*)params->memh;
     uct_ib_rcache_region_t *region;
 
     UCT_MD_MEM_DEREG_CHECK_PARAMS(params, 1);
+
+    if (ib_memh->flags & UCT_IB_MEM_FLAG_NO_RCACHE) {
+        return uct_ib_mem_dereg(uct_md, params);
+    }
 
     region = uct_ib_rcache_region_from_memh(params->memh);
     if (UCT_MD_MEM_DEREG_FIELD_VALUE(params, flags, FIELD_FLAGS, 0) &
@@ -1088,8 +1095,8 @@ static uct_md_ops_t uct_ib_md_rcache_ops = {
     .query                  = uct_ib_md_query,
     .mem_reg                = uct_ib_mem_rcache_reg,
     .mem_dereg              = uct_ib_mem_rcache_dereg,
-    .mem_reg_shared     = uct_ib_md_mem_reg_shared,
-    .import_shared_rkey = uct_ib_md_import_shared_rkey,
+    .mem_reg_shared         = uct_ib_md_mem_reg_shared,
+    .import_shared_rkey     = uct_ib_md_import_shared_rkey,
     .mem_advise             = uct_ib_mem_advise,
     .mkey_pack              = uct_ib_mkey_pack,
     .is_sockaddr_accessible = ucs_empty_function_return_zero_int,
