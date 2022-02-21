@@ -57,7 +57,7 @@ size_t ucp_rkey_packed_size(ucp_context_h context, ucp_md_map_t md_map,
     size += sizeof(uint8_t); /* Memory type */
 
     /* Always include shared key info for now */
-    size += sizeof(uint32_t); /* Peer id */
+    size += sizeof(uint8_t); /* Peer id */
 
     ucs_for_each_bit(md_index, md_map) {
         tl_rkey_size = context->tl_mds[md_index].attr.rkey_packed_size;
@@ -232,7 +232,7 @@ ucs_status_t ucp_rkey_pack(ucp_context_h context, ucp_mem_h memh,
     /* always acquire context lock */
     UCP_THREAD_CS_ENTER(&context->mt_lock);
 
-    ucs_trace("packing rkeys for buffer %p memh %p md_map 0x%"PRIx64,
+    ucs_print("packing rkeys for buffer %p memh %p md_map 0x%"PRIx64,
               ucp_memh_address(memh), memh, memh->md_map);
 
     if (ucp_memh_is_zero_length(memh)) {

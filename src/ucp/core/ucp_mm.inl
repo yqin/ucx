@@ -38,6 +38,8 @@ ucp_memh_get(ucp_context_h context, void *address, size_t length,
             return status;
         }
         return UCS_OK;
+    } else {
+        (*memh_p)->imported = 0;
     }
 
     if (ucs_likely(context->rcache != NULL)) {

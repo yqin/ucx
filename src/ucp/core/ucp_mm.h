@@ -32,6 +32,7 @@ typedef struct ucp_mem {
     ucp_md_index_t      alloc_md_index; /* Index of MD used to allocated the memory */
     ucp_md_map_t        md_map;         /* Which MDs have valid memory handles */
     ucp_rsc_index_t     peer_id;        /* Peer id for shared memh */
+    int                 imported;
     uct_mem_h           uct[0];         /* Sparse memory handles array num_mds in size */
 } ucp_mem_t;
 

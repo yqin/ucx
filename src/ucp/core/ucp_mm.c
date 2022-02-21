@@ -362,6 +362,8 @@ static ucs_status_t ucp_memh_register(ucp_context_h context, ucp_mem_h memh,
             status = uct_md_mem_reg_shared(context->tl_mds[md_index].md,
                                            &reg_shared_params,
                                            &memh->uct[md_index]);
+            ucs_print("reg shared memh: addr %p, len %zu, gvmi %d, status %s",
+                      address, length, memh->peer_id, ucs_status_string(status));
         } else {
             ucs_assert_always(memh->peer_id == UCP_NULL_RESOURCE);
             status = uct_md_mem_reg(context->tl_mds[md_index].md,
@@ -381,6 +383,10 @@ static ucs_status_t ucp_memh_register(ucp_context_h context, ucp_mem_h memh,
                   memh->uct[md_index]);
         md_map_registered |= UCS_BIT(md_index);
     }
+
+    ucs_print("Registered %s memh, mdmap 0x%lx (cur 0x%lx) gvmi %d",
+              ((uct_flags & UCT_MD_FLAG_SHARED_RKEY) ? "shared":""),
+              md_map_registered,memh->md_map,  memh->peer_id);
 
     memh->md_map |= md_map_registered;
     return UCS_OK;
@@ -408,7 +414,7 @@ ucp_memh_get_slow(ucp_context_h context, void *address, size_t length,
     }
 
     if (context->rcache == NULL) {
-        memh = ucs_calloc(1, sizeof(ucp_mem_h) +
+        memh = ucs_calloc(1, sizeof(*memh) +
                           (sizeof(uct_mem_h) * context->num_mds), "ucp rcache");
         if (memh == NULL) {
             return UCS_ERR_NO_MEMORY;
@@ -478,6 +484,7 @@ ucp_memh_alloc(ucp_context_h context, void *address, size_t length,
         status = ucp_memh_get_slow(context, mem.address, mem.length,
                                    mem.mem_type, reg_md_map, uct_flags,
                                    peer_id, &memh);
+        memh->imported = 0;
     } else {
         status = ucp_memh_import(context, rkey, address, length, &memh);
     }
@@ -523,6 +530,7 @@ ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
         return UCS_ERR_NO_MEMORY;
     }
 
+    ucs_print("ucp_memh_import, rkey mdmap 0x%lx rkey gvmi %d", rkey->md_map, rkey->peer_id);
     ucs_for_each_bit(md_index, rkey->md_map) {
         md_attr = &context->tl_mds[md_index].attr;
 
@@ -530,6 +538,10 @@ ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
         import_params.rkey        = rkey->tl_rkey[md_index].rkey.rkey;
         import_params.source_gvmi = rkey->peer_id;
 
+        ucs_print("registering address %p length %zu on md[%d]=%s gvmi %d rkey %lx",
+                  address, length, md_index,
+                  context->tl_mds[md_index].rsc.md_name,
+                  import_params.source_gvmi, import_params.rkey);
         status = uct_md_import_shared_rkey(context->tl_mds[md_index].md,
                                            &import_params,
                                            &memh->uct[md_index]);
@@ -548,8 +560,9 @@ ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
         md_map_registered |= UCS_BIT(md_index);
     }
 
-    memh->md_map |= md_map_registered;
-    *memh_p       = memh;
+    memh->md_map   = md_map_registered;
+    memh->imported = 1;
+    *memh_p        = memh;
 
     return UCS_OK;
 }
@@ -666,7 +679,14 @@ out:
 ucs_status_t ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh)
 {
     UCP_THREAD_CS_ENTER(&context->mt_lock);
-    ucp_memh_put(context, memh, 1);
+    ucs_print("unreg memh %p, map md0x%lx, imported %d",
+              memh, memh->md_map, memh->imported);
+    if (memh->imported) {
+        ucp_memh_dereg(context, memh, memh->md_map);
+        ucs_free(memh);
+    } else {
+        ucp_memh_put(context, memh, 1);
+    }
     UCP_THREAD_CS_EXIT(&context->mt_lock);
     return UCS_OK;
 }

@@ -951,7 +951,8 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
     dv.pd.out = &dvpd;
     mlx5dv_init_obj(&dv, MLX5DV_OBJ_PD);
 
-    ucs_print("reg_crossin address=%p", address);
+    ucs_print("reg_crossin address=%p target mkey 0x%x gvmi id %d",
+              address, target_mkey, target_gvmi_id);
 
     mkc = UCT_IB_MLX5DV_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 
