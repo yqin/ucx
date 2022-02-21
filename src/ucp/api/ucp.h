@@ -392,7 +392,9 @@ enum ucp_mem_map_params_field {
                                                            @ref ucp_mem_map routine.*/
     UCP_MEM_MAP_PARAM_FIELD_FLAGS       = UCS_BIT(2), /**< Allocation flags. */
     UCP_MEM_MAP_PARAM_FIELD_PROT        = UCS_BIT(3), /**< Memory protection mode. */
-    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE = UCS_BIT(4)  /**< Memory type. */
+    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE = UCS_BIT(4), /**< Memory type. */
+    UCP_MEM_MAP_PARAM_FIELD_PEER_ID     = UCS_BIT(5), /**< peer_id field */
+    UCP_MEM_MAP_PARAM_FIELD_RKEY        = UCS_BIT(6)  /**< rkey field */
 };
 
 /**
@@ -530,10 +532,11 @@ enum {
                                             if passed address is not a null-pointer
                                             then it will be used as a hint or direct
                                             address for allocation. */
-    UCP_MEM_MAP_FIXED    = UCS_BIT(2)  /**< Don't interpret address as a hint:
+    UCP_MEM_MAP_FIXED    = UCS_BIT(2), /**< Don't interpret address as a hint:
                                             place the mapping at exactly that
                                             address. The address must be a multiple
                                             of the page size. */
+    UCP_MEM_MAP_SHARED   = UCS_BIT(3)
 };
 
 
@@ -1587,6 +1590,11 @@ typedef struct ucp_mem_map_params {
       *    internally.
       */
      ucs_memory_type_t      memory_type;
+
+     /* Id of the peer to create a shared memh for */
+     uint32_t               peer_id;
+
+     ucp_rkey_h             rkey;
 } ucp_mem_map_params_t;
 
 

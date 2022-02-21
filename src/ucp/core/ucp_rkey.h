@@ -113,6 +113,7 @@ typedef struct ucp_rkey {
     ucp_ep_h                          ep;
 #endif
     ucp_md_map_t                      md_map;          /* Which *remote* MDs have valid memory handles */
+    ucp_rsc_index_t                   peer_id;         /* Peer id if rkey is shared, NULL_RESOURCE otherwise */
     ucp_tl_rkey_t                     tl_rkey[0];      /* UCT rkey for every remote MD */
 } ucp_rkey_t;
 

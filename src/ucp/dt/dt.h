@@ -28,6 +28,7 @@ typedef enum ucp_dt_type          ucp_dt_class_t;
 typedef struct ucp_dt_reg {
     ucp_md_map_t                  md_map;    /* Map of used memory domains */
     uct_mem_h                     memh[UCP_MAX_OP_MDS];
+    ucp_rsc_index_t               peer_id;
 } ucp_dt_reg_t;
 
 

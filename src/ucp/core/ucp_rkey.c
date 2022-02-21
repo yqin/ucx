@@ -56,6 +56,9 @@ size_t ucp_rkey_packed_size(ucp_context_h context, ucp_md_map_t md_map,
     size  = sizeof(ucp_md_map_t); /* Memory domains map */
     size += sizeof(uint8_t); /* Memory type */
 
+    /* Always include shared key info for now */
+    size += sizeof(uint32_t); /* Peer id */
+
     ucs_for_each_bit(md_index, md_map) {
         tl_rkey_size = context->tl_mds[md_index].attr.rkey_packed_size;
         ucs_assert_always(tl_rkey_size <= UINT8_MAX);
@@ -69,6 +72,7 @@ size_t ucp_rkey_packed_size(ucp_context_h context, ucp_md_map_t md_map,
         /* Distance of each device */
         size += ucs_popcount(sys_dev_map) * sizeof(ucp_rkey_packed_distance_t);
     }
+
 
     return size;
 }
@@ -121,7 +125,7 @@ ucp_rkey_pack_common(ucp_context_h context, ucp_md_map_t md_map,
                      const uct_mem_h *memh, const ucp_memory_info_t *mem_info,
                      ucp_sys_dev_map_t sys_dev_map,
                      const ucs_sys_dev_distance_t *sys_distance, void *buffer,
-                     int sparse_memh)
+                     int sparse_memh, ucp_rsc_index_t peer_id)
 {
     void *p = buffer;
     unsigned md_index, uct_memh_index;
@@ -135,13 +139,16 @@ ucp_rkey_pack_common(ucp_context_h context, ucp_md_map_t md_map,
     /* Check that md_map is valid */
     ucs_assert(ucs_test_all_flags(UCS_MASK(context->num_mds), md_map));
 
-    ucs_trace("packing rkey type %s md_map 0x%" PRIx64 "dev_map 0x%" PRIx64,
-              ucs_memory_type_names[mem_info->type], md_map, sys_dev_map);
+    ucs_trace("packing rkey type %s md_map 0x%" PRIx64 "dev_map 0x%" PRIx64
+              "peer id 0x%x",
+              ucs_memory_type_names[mem_info->type], md_map, sys_dev_map,
+              peer_id);
     ucs_log_indent(1);
 
     UCS_STATIC_ASSERT(UCS_MEMORY_TYPE_LAST <= 255);
-    *ucs_serialize_next(&p, ucp_md_map_t) = md_map;
-    *ucs_serialize_next(&p, uint8_t)      = mem_info->type;
+    *ucs_serialize_next(&p, ucp_md_map_t)    = md_map;
+    *ucs_serialize_next(&p, uint8_t)         = mem_info->type;
+    *ucs_serialize_next(&p, ucp_rsc_index_t) = peer_id;
 
     /* Write both size and rkey_buffer for each UCT rkey */
     uct_memh_index = 0;
@@ -189,14 +196,15 @@ out:
 
 UCS_PROFILE_FUNC(ssize_t, ucp_rkey_pack_uct,
                  (context, md_map, memh, mem_info, sys_dev_map, sys_distance,
-                  buffer),
+                  buffer, peer_id),
                  ucp_context_h context, ucp_md_map_t md_map,
                  const uct_mem_h *memh, const ucp_memory_info_t *mem_info,
                  ucp_sys_dev_map_t sys_dev_map,
-                 const ucs_sys_dev_distance_t *sys_distance, void *buffer)
+                 const ucs_sys_dev_distance_t *sys_distance, void *buffer,
+                 ucp_rsc_index_t peer_id)
 {
     return ucp_rkey_pack_common(context, md_map, memh, mem_info,
-                                sys_dev_map, sys_distance, buffer, 0);
+                                sys_dev_map, sys_distance, buffer, 0, peer_id);
 }
 
 UCS_PROFILE_FUNC(ssize_t, ucp_rkey_pack_memh,
@@ -208,7 +216,8 @@ UCS_PROFILE_FUNC(ssize_t, ucp_rkey_pack_memh,
                  const ucs_sys_dev_distance_t *sys_distance, void *buffer)
 {
     return ucp_rkey_pack_common(context, md_map, memh->uct, mem_info,
-                                sys_dev_map, sys_distance, buffer, 1);
+                                sys_dev_map, sys_distance, buffer, 1,
+                                memh->peer_id);
 }
 
 ucs_status_t ucp_rkey_pack(ucp_context_h context, ucp_mem_h memh,
@@ -244,6 +253,8 @@ ucs_status_t ucp_rkey_pack(ucp_context_h context, ucp_mem_h memh,
 
     mem_info.type    = memh->mem_type;
     mem_info.sys_dev = UCS_SYS_DEVICE_ID_UNKNOWN;
+
+
 
     packed_size = ucp_rkey_pack_memh(context, memh->md_map, memh, &mem_info,
                                      0, NULL, rkey_buffer);
@@ -402,6 +413,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_ep_rkey_unpack_internal,
 
     rkey->md_map   = md_map;
     rkey->mem_type = *ucs_serialize_next(&p, const uint8_t);
+    rkey->peer_id  = *ucs_serialize_next(&p, ucp_rsc_index_t);
     rkey->flags    = flags;
 #if ENABLE_PARAMS_CHECK
     rkey->ep       = ep;

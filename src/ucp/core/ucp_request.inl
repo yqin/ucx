@@ -604,8 +604,9 @@ ucp_request_init_dt_reg_from_memh(ucp_request_t *req, ucp_md_map_t md_map,
     ucs_assert((dt_reg == &req->send.state.dt.dt.contig) ||
                (dt_reg == &req->recv.state.dt.contig));
 
-    req->flags |= UCP_REQUEST_FLAG_USER_MEMH;
-    memh_index  = 0;
+    req->flags     |= UCP_REQUEST_FLAG_USER_MEMH;
+    memh_index      = 0;
+    dt_reg->peer_id = memh->peer_id;
     ucs_for_each_bit(md_index, memh->md_map) {
         if (md_map & UCS_BIT(md_index)) {
             dt_reg->memh[memh_index++] = memh->uct[md_index];
