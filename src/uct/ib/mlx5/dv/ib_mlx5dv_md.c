@@ -812,11 +812,10 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
             if ((errno == EPERM) || (errno == EPROTONOSUPPORT) ||
                 (errno == EOPNOTSUPP)) {
                 status = UCS_ERR_UNSUPPORTED;
-                ucs_error("mlx5dv_devx_general_cmd(QUERY_HCA_CAP) failed: %m");
             } else {
-                ucs_error("mlx5dv_devx_general_cmd(QUERY_HCA_CAP) failed: %m");
                 status = UCS_ERR_IO_ERROR;
             }
+            ucs_error("mlx5dv_devx_general_cmd(QUERY_HCA_CAP) failed: %m");
             goto err_free;
         }
 
@@ -952,7 +951,7 @@ uct_ib_mlx5_devx_reg_target_key(uct_ib_md_t *ib_md, void *address,
     memh->super.rkey = memh->super.lkey;
 
     /* export mkey */
-    if (token_len > 31) {
+    if (token_len > sizeof(((struct uct_ib_mlx5_allow_other_vhca_access_in_bits*)0)->access_key)) {
         ucs_error("token length exceeds limit");
         status = UCS_ERR_EXCEEDS_LIMIT;
         goto err_destroy;
@@ -1040,7 +1039,7 @@ uct_ib_mlx5_devx_reg_alias_key(uct_ib_md_t *ib_md, uint32_t target_vhca_id,
     }
 
     /* create alias */
-    if (token_len > 31) {
+    if (token_len > sizeof(((struct uct_ib_mlx5_alias_context_bits*)0)->access_key)) {
         ucs_error("token length exceeds limit");
         status = UCS_ERR_EXCEEDS_LIMIT;
         goto err_out;
