@@ -438,6 +438,7 @@ ucp_memh_get_slow(ucp_context_h context, void *address, size_t length,
 
     memh->mem_type = mem_type;
     memh->peer_id  = peer_id;
+    memh->imported = 0;
     status         = ucp_memh_register(context, memh,
                                        ~memh->md_map & reg_md_map,
                                        reg_address, reg_length,
