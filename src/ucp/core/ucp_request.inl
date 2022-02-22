@@ -650,6 +650,9 @@ ucp_request_is_user_memh_valid(ucp_request_t *req,
         return 0;
     }
 
+    ucs_print("set user memh %p, gvmi %d imported %d",
+              param->memh, param->memh->peer_id, param->memh->imported);
+
     ucs_assert(param->memh != NULL); /* For Coverity */
     return 1;
 }
@@ -664,8 +667,10 @@ ucp_send_request_set_user_memh(ucp_request_t *req, ucp_md_map_t md_map,
                                         req->send.length, req->send.datatype,
                                         (ucs_memory_type_t)req->send.mem_type,
                                         &status)) {
+        ucs_print("set send user memh failed %s", ucs_status_string(status));
         return status;
     }
+    ucs_print("set send user memh ok mdmap 0x%lx", md_map);
 
     /* req->send.state.dt should not be used with protov2 */
     ucs_assert(!req->send.ep->worker->context->config.ext.proto_enable);
@@ -687,6 +692,7 @@ ucp_recv_request_set_user_memh(ucp_request_t *req,
                                         req->recv.mem_type, &status)) {
         return status;
     }
+    ucs_print("set recv user memh ok");
 
     ucs_assert(!(req->flags & UCP_REQUEST_FLAG_USER_MEMH));
     req->flags         |= UCP_REQUEST_FLAG_USER_MEMH;
