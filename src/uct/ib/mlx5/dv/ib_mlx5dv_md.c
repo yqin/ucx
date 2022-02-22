@@ -967,7 +967,7 @@ uct_ib_mlx5_devx_reg_shared_key_old(uct_ib_md_t *ib_md, void *address,
 
     memh->type = UCT_IB_MLX5_MEM_SHARED;
 
-    // ucs_print("umr_reg crosses address=%p length=%zu", address, length);
+    ucs_print("umr_reg crosses address=%p length=%zu, allowed gvmi_id - %u", address, length, allowed_gvmi_id);
     memh->umem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address,
                                       length, UCT_IB_UMEM_ACCESS);
     if (memh->umem == NULL) {
