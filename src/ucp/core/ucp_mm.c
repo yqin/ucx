@@ -298,6 +298,11 @@ void ucp_memh_dereg(ucp_context_h context, ucp_mem_h memh, ucp_md_map_t md_map)
     /* Unregister from all memory domains */
     ucs_for_each_bit(md_index, md_map) {
         ucs_trace("de-registering memh[%d]=%p", md_index, memh->uct[md_index]);
+
+        if (memh->alloc_md_index == md_index) {
+            continue;
+        }
+
         ucs_assert(context->tl_mds[md_index].attr.cap.flags & UCT_MD_FLAG_REG);
         status = uct_md_mem_dereg(context->tl_mds[md_index].md,
                                   memh->uct[md_index]);
