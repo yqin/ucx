@@ -1038,6 +1038,7 @@ uct_ib_mlx5_devx_import_shared_key_old(uct_ib_md_t *ib_md,
     void *mkc;
     ucs_status_t status;
 
+    target_gvmi_id = 0; /* HACK */
     ucs_print("reg key %p crossing, target mkey - 0x%x target gvmi - %u", memh, target_mkey, target_gvmi_id);
     memh->type = UCT_IB_MLX5_MEM_IMPORTED;
 
