@@ -562,6 +562,12 @@ ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
 
     memh->md_map   = md_map_registered;
     memh->imported = 1;
+    memh->mem_type = UCS_MEMORY_TYPE_HOST;
+    memh->super.super.start = (uintptr_t)address;
+    memh->super.super.end   = (uintptr_t)address + length;
+    memh->alloc_md_index    = UCP_NULL_RESOURCE;
+    memh->alloc_method      = UCT_ALLOC_METHOD_LAST;
+    memh->peer_id  = UCP_NULL_RESOURCE;
     *memh_p        = memh;
 
     return UCS_OK;
@@ -679,8 +685,8 @@ out:
 ucs_status_t ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh)
 {
     UCP_THREAD_CS_ENTER(&context->mt_lock);
-    ucs_print("unreg memh %p, map md0x%lx, imported %d",
-              memh, memh->md_map, memh->imported);
+    ucs_print("unreg memh %p, map md0x%lx, imported %d gvmi %d",
+              memh, memh->md_map, memh->imported, memh->peer_id);
     if (memh->imported) {
         ucp_memh_dereg(context, memh, memh->md_map);
         ucs_free(memh);
