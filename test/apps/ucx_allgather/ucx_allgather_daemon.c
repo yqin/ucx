@@ -119,17 +119,23 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 			continue;
 		}
 
+		DOCA_LOG_INFO("%zu: unpack length - %zu, addr - %p", i, xgvmi_key->length,
+						(void*)xgvmi_key->address);
+
 		allgather_request->xgvmi_memhs[i]->address = xgvmi_key->address;
 		allgather_request->xgvmi_memhs[i]->memh =
 				ucx_mem_map(context, (void*)(uintptr_t)allgather_request->xgvmi_memhs[i]->address,
 							allgather_request->header.vector_size *
 							allgather_datatype_size[ucx_app_config.datatype], xgvmi_key->rkey_buffer, UINT32_MAX, 0);
-		p += sizeof(xgvmi_key) + xgvmi_key->length;
+		p += sizeof(*xgvmi_key) + xgvmi_key->length;
 	}
 
 	/** Attach the received allgather request to the allgather super request for futher processing */
 	allgather_request->allgather_super_request = allgather_super_request;
 	++allgather_super_request->num_allgather_requests;
+	DOCA_LOG_INFO("num_allgather_requests=%zu num_daemon_bound_clients=%zu",
+	              allgather_super_request->num_allgather_requests,
+				  ucx_app_config.num_daemon_bound_clients);
 	allgather_vector_received(&allgather_request->header, allgather_super_request, allgather_request->vector);
 	allgather_request->vector = NULL;
 	STAILQ_INSERT_TAIL(&allgather_super_request->allgather_requests_list, allgather_request, entry);

@@ -281,6 +281,7 @@ static int am_send(struct ucx_connection *connection, unsigned int am_id, int lo
 	ucs_status_ptr_t status_ptr;
 
 	if (memh != NULL) {
+		DOCA_LOG_INFO("send_nbx: memh - %p", memh->memh);
 		param.memh = memh->memh;
 		param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMH;
 	}
@@ -992,6 +993,10 @@ void* ucx_rkey_pack(struct ucx_context *context, struct ucx_memh *memh, size_t *
 	ucs_status_t status;
 
 	status = ucp_rkey_pack(context->context, memh->memh, &rkey_buffer, length);
+	if (status != UCS_OK) {
+		DOCA_LOG_ERR("failed to pack: %s", ucs_status_string(status));
+		return NULL;
+	}
 
 	return rkey_buffer;
 }

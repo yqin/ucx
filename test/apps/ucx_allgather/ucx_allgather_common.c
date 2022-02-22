@@ -230,6 +230,9 @@ static void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allga
 		((struct ucx_allgather_xgvmi_key*)p)->address = (uint64_t)(uintptr_t)allgather_super_request->recv_vectors[i];
 		p += sizeof(struct ucx_allgather_xgvmi_key);
 
+		DOCA_LOG_INFO("%zu: length - %zu, addr - %p", i, rkey_buffer_lengths[i],
+						allgather_super_request->recv_vectors[i]);
+
 		memcpy(p, allgather_super_request->recv_rkey_buffers[i], rkey_buffer_lengths[i]);
 		p += rkey_buffer_lengths[i];
 	}
