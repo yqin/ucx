@@ -1293,7 +1293,10 @@ public:
                               UCP_MEM_MAP_PARAM_FIELD_FLAGS;
         mparams.address     = NULL;
         mparams.length      = length;
-        mparams.peer_id     = 70;
+        mparams.peer_id     = 0;
+        if (getenv("GVMI") != NULL) {
+            mparams.peer_id = atoi(getenv("GVMI"));
+        }
         mparams.flags       = UCP_MEM_MAP_ALLOCATE | UCP_MEM_MAP_SHARED;
         ASSERT_UCS_OK(ucp_mem_map(sender().ucph(), &mparams, &memh));
 
