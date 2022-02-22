@@ -527,6 +527,7 @@ ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
     uct_md_attr_t *md_attr;
     ucp_md_index_t md_index;
     ucs_status_t status;
+    int rkey_index;
 
     ucs_assert_always(rkey->peer_id != UCP_NULL_RESOURCE);
 
@@ -540,8 +541,11 @@ ucs_status_t ucp_memh_import(ucp_context_h context, ucp_rkey_h rkey,
     ucs_for_each_bit(md_index, rkey->md_map) {
         md_attr = &context->tl_mds[md_index].attr;
 
+       // TODO map remote md_index to local md index
+        rkey_index  = ucs_bitmap2idx(rkey->md_map, md_index);
+
         ucs_assert_always(md_attr->cap.flags & UCT_MD_FLAG_SHARED_RKEY);
-        import_params.rkey        = rkey->tl_rkey[md_index].rkey.rkey;
+        import_params.rkey        = rkey->tl_rkey[rkey_index].rkey.rkey;
         import_params.source_gvmi = rkey->peer_id;
 
         ucs_print("registering address %p length %zu on md[%d]=%s gvmi %d rkey %lx",
