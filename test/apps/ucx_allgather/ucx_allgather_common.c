@@ -202,7 +202,7 @@ static void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allga
 		allgather_super_request->recv_memhs[i] = ucx_mem_map(context, NULL,
 															allgather_super_request->result_vector_size *
 															allgather_datatype_size[ucx_app_config.datatype],
-															NULL, 0, 1);
+															NULL, 3, 1);
 		if (allgather_super_request->recv_memhs[i] == NULL) {
 			DOCA_LOG_ERR("failed to do mem_map");
 			return NULL;

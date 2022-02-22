@@ -107,7 +107,7 @@ static int allgather_vectors_init(void)
 	/** Go through all vectors, allocate them */
 	for (vector_iter = 0; vector_iter < ucx_app_config.batch_size; ++vector_iter) {
 		allgather_memhs[vector_iter] = ucx_mem_map(
-				context, NULL, vector_size, NULL, 0,
+				context, NULL, vector_size, NULL, 3,
 				ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE);
 		if (allgather_memhs[vector_iter] == NULL)
 			goto err_allgather_vectors_cleanup;
