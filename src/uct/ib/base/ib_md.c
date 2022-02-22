@@ -855,7 +855,7 @@ uct_ib_md_mem_reg_shared(uct_md_h uct_md, uct_md_mem_reg_shared_params_t *params
     ucs_status_t status;
 
     ib_memh = uct_ib_memh_alloc(md);
-    status = md->ops->reg_crossed_key(md, params->address, params->length,
+    status = md->ops->reg_shared_key(md, params->address, params->length,
                                       params->dest_gvmi, ib_memh);
     if (status != UCS_OK) {
         uct_ib_memh_free(ib_memh);
@@ -877,7 +877,7 @@ uct_ib_md_import_shared_rkey(uct_md_h uct_md,
     ucs_status_t status;
 
     ib_memh = uct_ib_memh_alloc(md);
-    status  = md->ops->reg_crossing_key(md, params->source_gvmi,
+    status  = md->ops->import_shared_key(md, params->source_gvmi,
                                         uct_ib_md_direct_rkey(params->rkey),
                                         ib_memh);
     if (status != UCS_OK) {

@@ -80,7 +80,8 @@ enum {
     UCT_IB_MLX5_CMD_OP_QUERY_LAG               = 0x842,
     UCT_IB_MLX5_CMD_OP_CREATE_GENERAL_OBJECT   = 0xa00,
     UCT_IB_MLX5_CMD_OP_MODIFY_GENERAL_OBJECT   = 0xa01,
-    UCT_IB_MLX5_CMD_OP_QUERY_GENERAL_OBJECT    = 0xa02
+    UCT_IB_MLX5_CMD_OP_QUERY_GENERAL_OBJECT    = 0xa02,
+    UCT_IB_MLX5_CMD_OP_ALLOW_OTHER_VHCA_ACCESS = 0xb16
 };
 
 enum {
@@ -96,7 +97,19 @@ enum {
 };
 
 struct uct_ib_mlx5_cmd_hca_cap_bits {
-    uint8_t    reserved_at_0[0x30];
+    uint8_t    access_other_hca_roce[0x1];
+    uint8_t    reserved_at_1[0x1e];
+    uint8_t    vhca_resource_manager[0x1];
+
+    uint8_t    hca_cap_2[0x1];
+    uint8_t    create_lag_when_not_master_up[0x1];
+    uint8_t    dtor[0x1];
+    uint8_t    event_on_vhca_state_teardown_request[0x1];
+    uint8_t    event_on_vhca_state_in_use[0x1];
+    uint8_t    event_on_vhca_state_active[0x1];
+    uint8_t    event_on_vhca_state_allocated[0x1];
+    uint8_t    event_on_vhca_state_invalid[0x1];
+    uint8_t    transpose_max_element_size[0x8];
     uint8_t    vhca_id[0x10];
 
     uint8_t    reserved_at_40[0x40];
@@ -463,13 +476,40 @@ struct uct_ib_mlx5_atomic_caps_bits {
 struct uct_ib_mlx5_cmd_hca_cap_2_bits {
     uint8_t    reserved_at_0[0x80];
 
-    uint8_t    reserved_at_80[0x13];
-    /* Log (base 2) of the minimum bulk granularity of
-       allocated RESERVED_QPN objects */
+    uint8_t    reserved_at_80[0x3];
+    uint8_t    max_num_prog_sample_field[0x5];
+    uint8_t    reserved_at_88[0x3];
+    uint8_t    log_max_num_reserved_qpn[0x5];
+    uint8_t    atomic_rate_pa[0x1];
+    uint8_t    introspection_mkey_access_allowed[0x1];
+    uint8_t    reserved_at_92[0x1];
     uint8_t    log_reserved_qpn_granularity[0x5];
-    uint8_t    reserved_at_98[0x8];
+    uint8_t    reserved_at_98[0x3];
+    uint8_t    log_reserved_qpn_max_alloc[0x5];
 
-    uint8_t    reserved_at_a0[0x760];
+    uint8_t    max_reformat_insert_size[0x8];
+    uint8_t    max_reformat_insert_offset[0x8];
+    uint8_t    max_reformat_remove_size[0x8];
+    uint8_t    max_reformat_remove_offset[0x8];
+
+    uint8_t    multi_sl_qp[0x1];
+    uint8_t    non_tunnel_reformat[0x1];
+    uint8_t    reserved_at_122[0x1];
+    uint8_t    log_min_stride_wqe_sz[0x5];
+    uint8_t    reserved_at_128[0x3];
+    uint8_t    log_conn_track_granularity[0x5];
+    uint8_t    reserved_at_130[0x3];
+    uint8_t    log_conn_track_max_alloc[0x5];
+    uint8_t    reserved_at_138[0x3];
+    uint8_t    log_max_conn_track_offload[0x5];
+
+    uint8_t    cross_vhca_object_to_object_supported[0x20];
+
+    uint8_t    allowed_object_for_other_vhca_access[0x40];
+
+    uint8_t    introspection_mkey[0x20];
+
+    uint8_t    reserved_at_220[0x6A0];
 };
 
 struct uct_ib_mlx5_odp_per_transport_service_cap_bits {
@@ -1581,6 +1621,21 @@ enum {
     UCT_IB_MLX5_EVENT_TYPE_SRQ_LAST_WQE       = 0x13
 };
 
+struct uct_ib_mlx5_general_obj_in_cmd_hdr_bits {
+    uint8_t         opcode[0x10];
+    uint8_t         uid[0x10];
+
+    uint8_t         vhca_tunnel_id[0x10];
+    uint8_t         obj_type[0x10];
+
+    uint8_t         obj_id[0x20];
+
+    uint8_t         alias_object[0x1];
+    uint8_t         reserved_at_61[0x2];
+    uint8_t         log_obj_range[0x5];
+    uint8_t         reserved_at_68[0x18];
+};
+
 struct uct_ib_mlx5_general_obj_out_cmd_hdr_bits {
     uint8_t         status[0x8];
     uint8_t         reserved_at_8[0x18];
@@ -1590,20 +1645,6 @@ struct uct_ib_mlx5_general_obj_out_cmd_hdr_bits {
     uint8_t         obj_id[0x20];
 
     uint8_t         reserved_at_60[0x20];
-};
-
-struct uct_ib_mlx5_general_obj_in_cmd_hdr_bits {
-    uint8_t         opcode[0x10];
-    uint8_t         uid[0x10];
-
-    uint8_t         reserved_at_20[0x10];
-    uint8_t         obj_type[0x10];
-
-    uint8_t         obj_id[0x20];
-
-    uint8_t         reserved_at_60[0x3];
-    uint8_t         log_obj_range[0x5];
-    uint8_t         reserved_at_68[0x18];
 };
 
 struct uct_ib_mlx5_reserved_qpn_bits {
@@ -1617,6 +1658,60 @@ struct uct_ib_mlx5_create_reserved_qpn_in_bits {
 
 enum {
     UCT_IB_MLX5_OBJ_TYPE_RESERVED_QPN = 0x002C,
+    UCT_IB_MLX5_OBJ_TYPE_MKEY         = 0xFF01,
+};
+
+struct uct_ib_mlx5_allow_other_vhca_access_in_bits {
+    uint8_t         opcode[0x10];
+    uint8_t         uid[0x10];
+
+    uint8_t         reserved_at_20[0x10];
+    uint8_t         op_mod[0x10];
+
+    uint8_t         reserved_at_40[0x40];
+
+    uint8_t         reserved_at_80[0x10];
+    uint8_t         object_type_to_be_accessed[0x10];
+
+    uint8_t         object_id_to_be_accessed[0x20];
+
+    uint8_t         reserved_at_a0[0x40];
+
+    uint8_t         access_key[0x100];
+};
+
+struct uct_ib_mlx5_allow_other_vhca_access_out_bits {
+    uint8_t         status[0x8];
+    uint8_t         reserved_at_8[0x18];
+
+    uint8_t         syndrome[0x20];
+
+    uint8_t         reserved_at_40[0x40];
+};
+
+struct uct_ib_mlx5_alias_context_bits {
+    uint8_t         vhca_id_to_be_accessed[0x10];
+    uint8_t         reserved_at_10[0xd];
+    uint8_t         status[0x3];
+
+    uint8_t         object_id_to_be_accessed[0x20];
+
+    uint8_t         reserved_at_40[0x40];
+
+    uint8_t         access_key[0x100];
+
+    uint8_t         metadata_1[0x20];
+    uint8_t         metadata_2[0x60];
+};
+
+struct uct_ib_mlx5_create_alias_obj_in_bits {
+    struct uct_ib_mlx5_general_obj_in_cmd_hdr_bits hdr;
+    struct uct_ib_mlx5_alias_context_bits alias_ctx;
+};
+
+struct uct_ib_mlx5_create_alias_obj_out_bits {
+    struct uct_ib_mlx5_general_obj_out_cmd_hdr_bits hdr;
+    struct uct_ib_mlx5_alias_context_bits alias_ctx;
 };
 
 #endif
