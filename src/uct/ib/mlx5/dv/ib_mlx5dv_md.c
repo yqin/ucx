@@ -1012,7 +1012,7 @@ uct_ib_mlx5_devx_reg_shared_key_old(uct_ib_md_t *ib_md, void *address,
                        UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
 
-    // ucs_print("crossed mkey is %x", memh->super.lkey);
+    ucs_print("crossed mkey is %x", memh->super.lkey);
 
     status = UCS_OK;
 
@@ -1038,7 +1038,7 @@ uct_ib_mlx5_devx_import_shared_key_old(uct_ib_md_t *ib_md,
     void *mkc;
     ucs_status_t status;
 
-    ucs_print("reg key %p crossing", memh);
+    ucs_print("reg key %p crossing, target mkey - 0x%x target gvmi - %u", memh, target_mkey, target_gvmi_id);
     memh->type = UCT_IB_MLX5_MEM_IMPORTED;
 
     dv.pd.in = md->super.pd;
