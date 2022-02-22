@@ -10,6 +10,8 @@ SUBDIRS = profiling
 
 SUBDIRS += iodemo
 
+SUBDIRS += ucx_allgather
+
 if HAVE_CXX11
 SUBDIRS += sockaddr
 endif

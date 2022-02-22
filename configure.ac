@@ -384,6 +384,7 @@ AC_CONFIG_FILES([
                  src/tools/profile/Makefile
                  test/apps/Makefile
                  test/apps/iodemo/Makefile
+                 test/apps/ucx_allgather/Makefile
                  test/apps/sockaddr/Makefile
                  test/apps/profiling/Makefile
                  test/mpi/Makefile
