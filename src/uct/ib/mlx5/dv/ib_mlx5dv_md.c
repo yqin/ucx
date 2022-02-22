@@ -800,11 +800,11 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
                           crossing_vhca_mkey)) {
         ucs_info("%s: vhca_id=%d crossing_vhca_mkey is supported",
                  uct_ib_device_name(dev), md->super.vhca_id);
-        md->super.extra_cap_flags |= UCT_MD_FLAG_SHARED_RKEY;
     } else {
         ucs_info("%s: vhca_id=%d crossing_vhca_mkey is not supported",
                  uct_ib_device_name(dev), md->super.vhca_id);
     }
+    md->super.extra_cap_flags |= UCT_MD_FLAG_SHARED_RKEY;
 
     status = uct_ib_mlx5_devx_check_odp(md, md_config, cap);
     if (status != UCS_OK) {
@@ -906,6 +906,8 @@ static void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
     ucs_recursive_spinlock_destroy(&md->dbrec_lock);
 }
 
+#define UCT_IB_CROSS_KEY_IDX 0xcc
+
 static ucs_status_t
 uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
                                  size_t length, uint32_t allowed_gvmi_id,
@@ -948,7 +950,7 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     UCT_IB_MLX5DV_SET(mkc, mkc, translations_octword_size, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, log_entity_size, 12);
     UCT_IB_MLX5DV_SET(mkc, mkc, qpn, 0xffffff);
-    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, (intptr_t)address & 0xff);
+    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, UCT_IB_CROSS_KEY_IDX);
     UCT_IB_MLX5DV_SET(mkc, mkc, alter_pd_to_vhca_id, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, crossed_side_mkey, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_gvmi_id, allowed_gvmi_id);
@@ -964,9 +966,9 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
         goto err_free;
     }
 
-    memh->super.lkey =
-        (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index) << 8) |
-        ((intptr_t)address & 0xff);
+    memh->super.lkey = (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index)
+                        << 8) |
+                       UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
 
     ucs_print("crossed mkey is %x", memh->super.lkey);
@@ -981,8 +983,7 @@ err_out:
 }
 
 static ucs_status_t
-uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
-                                  size_t length, uint32_t target_gvmi_id,
+uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, uint32_t target_gvmi_id,
                                   uint32_t target_mkey, uct_ib_mem_t *ib_memh)
 {
     uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
@@ -1001,15 +1002,16 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
     dv.pd.out = &dvpd;
     mlx5dv_init_obj(&dv, MLX5DV_OBJ_PD);
 
-    ucs_print("reg_crossin address=%p target mkey 0x%x gvmi id %d",
-              address, target_mkey, target_gvmi_id);
+    ucs_print("reg crossing target_mkey=0x%x", target_mkey);
 
     mkc = UCT_IB_MLX5DV_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 
     UCT_IB_MLX5DV_SET(create_mkey_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_MKEY);
     UCT_IB_MLX5DV_SET(create_mkey_in, in, translations_octword_actual_size, 0);
-    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_1_0, UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA & 0x3);
-    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_4_2, (UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA & 0x1C) >> 2);
+    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_1_0,
+                      UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA & 0x3);
+    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_4_2,
+                      (UCT_IB_MLX5_MKC_ACCESS_MODE_CROSSING_VHCA & 0x1C) >> 2);
     UCT_IB_MLX5DV_SET(mkc, mkc, a, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, rw, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, rr, 1);
@@ -1019,7 +1021,7 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
     UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_gvmi_id, target_gvmi_id);
     UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_mkey, target_mkey);
     UCT_IB_MLX5DV_SET(mkc, mkc, qpn, 0xffffff);
-    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, (intptr_t)address & 0xff);
+    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, UCT_IB_CROSS_KEY_IDX);
     UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (intptr_t)0);
     UCT_IB_MLX5DV_SET(mkc, mkc, length64, 1);
 
@@ -1032,9 +1034,9 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, void *address,
         goto err_out;
     }
 
-    memh->super.lkey =
-        (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index) << 8) |
-        ((intptr_t)address & 0xff);
+    memh->super.lkey = (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index)
+                        << 8) |
+                       UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
 
     ucs_print("crossing mkey is %x", memh->super.lkey);

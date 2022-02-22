@@ -364,8 +364,6 @@ typedef ucs_status_t (*uct_ib_md_reg_crossed_key_func_t)(uct_ib_md_t *ib_md,
  * @return UCS_OK on success or error code in case of failure.
  */
 typedef ucs_status_t (*uct_ib_md_reg_crossing_key_func_t)(uct_ib_md_t *ib_md,
-                                                          void *address,
-                                                          size_t length,
                                                           uint32_t target_gvmi_id,
                                                           uint32_t target_mkey,
                                                           uct_ib_mem_t *ib_memh);
