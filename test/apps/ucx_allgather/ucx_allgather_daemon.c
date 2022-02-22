@@ -108,11 +108,17 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 	}
 
 	/** Parse XGVMI keys */
-	xgvmi_buffer = allgather_request->vector;
+	p = xgvmi_buffer = allgather_request->vector;
 	assert(xgvmi_buffer->num_keys == ucx_app_config.num_clients);
 	p += sizeof(*xgvmi_buffer);
 	for (i = 0; i < xgvmi_buffer->num_keys; ++i) {
 		xgvmi_key = (struct ucx_allgather_xgvmi_key*)p;
+		allgather_request->xgvmi_memhs[i] = malloc(sizeof(*allgather_request->xgvmi_memhs[i]));
+		if (allgather_request->xgvmi_memhs[i] == NULL) {
+			DOCA_LOG_ERR("failed to allocate memory");
+			continue;
+		}
+
 		allgather_request->xgvmi_memhs[i]->address = xgvmi_key->address;
 		allgather_request->xgvmi_memhs[i]->memh =
 				ucx_mem_map(context, (void*)(uintptr_t)allgather_request->xgvmi_memhs[i]->address,

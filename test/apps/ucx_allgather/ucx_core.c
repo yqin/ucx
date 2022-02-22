@@ -934,7 +934,7 @@ struct ucx_memh* ucx_mem_map(struct ucx_context *context, void *address, size_t 
 		mparams.flags       = UCP_MEM_MAP_ALLOCATE;
 	} else {
 		assert(address != NULL);
-		mparams.field_mask  = UCP_MEM_MAP_PARAM_FIELD_RKEY | UCP_MEM_MAP_PARAM_FIELD_ADDRESS;
+		mparams.field_mask |= UCP_MEM_MAP_PARAM_FIELD_RKEY | UCP_MEM_MAP_PARAM_FIELD_ADDRESS;
 
 		status = ucp_worker_rkey_unpack(context->worker, rkey_buffer, &rkey);
 		if (status != UCS_OK) {

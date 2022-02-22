@@ -199,11 +199,11 @@ static void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allga
 			continue;
 		}*/
 
-		allgather_super_request->recv_vectors[i] = ucx_mem_map(context, NULL,
+		allgather_super_request->recv_memhs[i] = ucx_mem_map(context, NULL,
 															allgather_super_request->result_vector_size *
 															allgather_datatype_size[ucx_app_config.datatype],
 															NULL, 0, 1);
-		if (allgather_super_request->recv_vectors[i] == NULL) {
+		if (allgather_super_request->recv_memhs[i] == NULL) {
 			DOCA_LOG_ERR("failed to do mem_map");
 			return NULL;
 		}
@@ -219,6 +219,8 @@ static void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allga
 		DOCA_LOG_ERR("failed to alloc mem for xgvmi_keys_buffer");
 		return NULL;
 	}
+
+	p = (uint8_t*)xgvmi_keys_buffer;
 
 	((struct ucx_allgather_xgvmi_buffer*)xgvmi_keys_buffer)->num_keys = ucx_app_config.num_clients;
 	p += sizeof(struct ucx_allgather_xgvmi_buffer);
@@ -265,7 +267,8 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 		assert(ucx_app_config.role == UCX_ALLGATHER_CLIENT);
 		allgather_super_request->num_allgather_operations = 2 * (ucx_app_config.num_clients - 1) + 1;
 	} else if (ucx_app_config.role == UCX_ALLGATHER_CLIENT) {
-		assert(ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_MODE);
+		assert(ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_MODE ||
+			   ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE);
 		assert(ucx_app_config.dest_addresses.num == 1);
 		allgather_super_request->num_allgather_operations = ucx_app_config.num_clients - 1;
 	} else {
@@ -347,7 +350,7 @@ struct ucx_allgather_request *allgather_request_allocate(struct ucx_connection *
 		goto err_allgather_request_free;
 	}
 
-	if (ucx_app_config.allgather_mode == UCX_ALLGATHER_CTRL_XGVMI_AM_ID) {
+	if (ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
 		allgather_request->xgvmi_memhs = malloc(ucx_app_config.num_clients *sizeof(*allgather_request->xgvmi_memhs));
 		if (allgather_request->xgvmi_memhs == NULL) {
 			DOCA_LOG_ERR("failed to allocate memory for xgvmi keys");

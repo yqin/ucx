@@ -474,7 +474,7 @@ typedef size_t (*allgather_batch_submit_func)(size_t vector_size, size_t batch_s
 static void allgather_barrier(allgather_batch_submit_func batch_submit_func)
 {
 	/** Do 0-byte allgather operation to make sure all clients and daemons are up and running */
-	batch_submit_func(0, 1);
+	batch_submit_func(1, 1);
 	allgather_batch_wait();
 }
 
@@ -574,6 +574,9 @@ void client_run(void)
 		break;
 	case UCX_ALLGATHER_NON_OFFLOADED_MODE:
 		allgather(allgather_non_offloaded_batch_submit);
+		break;
+	case UCX_ALLGATHER_OFFLOADED_XGVMI_MODE:
+		allgather(allgather_xgvmi_offloaded_batch_submit);
 		break;
 	default:
 		DOCA_LOG_ERR("unsupported allgather mode: %d", ucx_app_config.allgather_mode);
