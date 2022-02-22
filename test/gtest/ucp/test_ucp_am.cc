@@ -41,8 +41,8 @@ public:
         modify_config("MAX_EAGER_LANES", "2");
 
         ucp_test::init();
-      //  sender().connect(&receiver(), get_ep_params());
-       // receiver().connect(&sender(), get_ep_params());
+        sender().connect(&receiver(), get_ep_params());
+        receiver().connect(&sender(), get_ep_params());
     }
 
 protected:
@@ -1314,7 +1314,7 @@ public:
         ASSERT_UCS_OK(ucp_rkey_pack(context, memh, &rkey_buf,
                     &rkey_buf_size));
 
-        ASSERT_UCS_OK(ucp_worker_rkey_unpack(sender().worker(), rkey_buf,
+        ASSERT_UCS_OK(ucp_ep_rkey_unpack(sender().ep(), rkey_buf,
                       &mparams.rkey));
 
         ucp_rkey_buffer_release(rkey_buf);
@@ -1412,9 +1412,11 @@ public:
         ucp_request_param_t op_param;
         op_param.op_attr_mask = UCP_OP_ATTR_FIELD_MEMH |
                                 UCP_OP_ATTR_FIELD_CALLBACK |
+                                UCP_OP_ATTR_FIELD_USER_DATA |
                                 UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
         op_param.memh         = self->m_imp_memh;
-        op_param.cb.recv_am   = am_data_recv_cb;
+        op_param.cb.recv_am   = am_data_rndv_recv_cb;
+        op_param.user_data    = self;
         ucs_status_ptr_t rptr = ucp_am_recv_data_nbx(self->receiver().worker(),
                                                      data, address, length,
                                                      &op_param);
@@ -1537,7 +1539,6 @@ UCS_TEST_P(test_ucp_am_nbx_rndv, shared_mkey)
     void *address = alloc_memhs(sender().ucph(), length, &exp_memh, &imp_memh);
     ASSERT_TRUE(address != NULL);
 
-#if 0
     ucp_request_param_t param;
     param.op_attr_mask    = UCP_OP_ATTR_FIELD_MEMH;
     param.memh            = imp_memh;
@@ -1546,7 +1547,6 @@ UCS_TEST_P(test_ucp_am_nbx_rndv, shared_mkey)
 
     EXPECT_EQ(m_status, request_wait(sptr));
     EXPECT_TRUE(m_am_received);
-#endif
     free_memhs(sender().ucph(), exp_memh, imp_memh);
 }
 
