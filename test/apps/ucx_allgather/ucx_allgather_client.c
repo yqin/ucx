@@ -474,7 +474,7 @@ typedef size_t (*allgather_batch_submit_func)(size_t vector_size, size_t batch_s
 static void allgather_barrier(allgather_batch_submit_func batch_submit_func)
 {
 	/** Do 0-byte allgather operation to make sure all clients and daemons are up and running */
-	batch_submit_func(1, 1);
+	batch_submit_func(ucx_app_config.vector_size * allgather_datatype_size[ucx_app_config.datatype], 1);
 	allgather_batch_wait();
 }
 
