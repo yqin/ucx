@@ -33,6 +33,9 @@ struct ucx_allgather_metrics {
 };
 
 static void **allgather_vectors; /*< Array of allgather vectors */
+static struct ucx_memh **allgather_memhs; /*< Array of allgather memory handles */
+static void **allgather_rkey_buffers; /*< Array of allgather rkey buffers */
+static size_t allgather_rkey_buffer_length = 0;
 static size_t allgather_next_id; /*< Next allgather ID which could be allocated by clients */
 
 DOCA_LOG_REGISTER(UCX_allgather::Cleint);
@@ -43,8 +46,10 @@ static void allgather_vectors_cleanup(size_t num_allgather_vectors)
 	size_t vector_iter;
 
 	/** Go through all vectors and free the memory allocated to hold them */
-	for (vector_iter = 0; vector_iter < num_allgather_vectors; ++vector_iter)
-		free(allgather_vectors[vector_iter]);
+	for (vector_iter = 0; vector_iter < num_allgather_vectors; ++vector_iter) {
+		ucx_mem_unmap(context, allgather_memhs[vector_iter]);
+		//free(allgather_vectors[vector_iter]);
+	}
 
 	free(allgather_vectors);
 }
@@ -79,6 +84,7 @@ static int allgather_vectors_init(void)
 {
 	size_t vector_size = ucx_app_config.vector_size * allgather_datatype_size[ucx_app_config.datatype];
 	size_t vector_iter, num_allgather_vectors = 0;
+	size_t rkey_buffer_length;
 
 	allgather_vectors = malloc(ucx_app_config.batch_size * sizeof(*allgather_vectors));
 	if (allgather_vectors == NULL) {
@@ -86,11 +92,39 @@ static int allgather_vectors_init(void)
 		goto err;
 	}
 
+	allgather_memhs = malloc(ucx_app_config.batch_size * sizeof(*allgather_memhs));
+	if (allgather_memhs == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory to hold array of allgather memhs");
+		goto err;
+	}
+
+	allgather_rkey_buffers = malloc(ucx_app_config.batch_size * sizeof(*allgather_rkey_buffers));
+	if (allgather_rkey_buffers == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory to hold array of allgather rkey buffers");
+		goto err;
+	}
+
 	/** Go through all vectors, allocate them */
 	for (vector_iter = 0; vector_iter < ucx_app_config.batch_size; ++vector_iter) {
-		allgather_vectors[vector_iter] = malloc(vector_size);
-		if (allgather_vectors[vector_iter] == NULL)
+		allgather_memhs[vector_iter] = ucx_mem_map(
+				context, NULL, vector_size, NULL, 0,
+				ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE);
+		if (allgather_memhs[vector_iter] == NULL)
 			goto err_allgather_vectors_cleanup;
+
+		allgather_vectors[vector_iter] = allgather_memhs[vector_iter]->address;
+		assert(allgather_vectors[vector_iter] != NULL);
+
+		if (ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
+			allgather_rkey_buffers[vector_iter] = ucx_rkey_pack(context, allgather_memhs[vector_iter], &rkey_buffer_length);
+			assert(allgather_rkey_buffers[vector_iter] != NULL);
+			assert(rkey_buffer_length != 0);
+			if (allgather_rkey_buffer_length == 0) {
+				allgather_rkey_buffer_length = rkey_buffer_length;
+			} else {
+				assert(allgather_rkey_buffer_length == rkey_buffer_length);
+			}
+		}
 
 		++num_allgather_vectors;
 	}
@@ -104,10 +138,16 @@ err:
 }
 
 /** Allocate vector for send operation and move iterator to the next one which will be allocated next time */
-static inline void *preallocated_vector_get(void)
+static inline void *preallocated_vector_get(struct ucx_memh **mem_handle, void **rkey_buffer)
 {
 	static size_t allgather_vector_iter;
 	void *vector = allgather_vectors[allgather_vector_iter];
+
+	if (mem_handle != NULL)
+		*mem_handle = allgather_memhs[allgather_vector_iter];
+
+	if (rkey_buffer != NULL)
+		*rkey_buffer = allgather_rkey_buffers[allgather_vector_iter];
 
 	allgather_vector_iter = (allgather_vector_iter + 1) % ucx_app_config.batch_size;
 	return vector;
@@ -142,10 +182,10 @@ int client_am_recv_ctrl_callback(struct ucx_am_desc *am_desc)
 	}
 
 	/** Continue receiving data to the allocated vector */
-	ucx_am_recv(am_desc, allgather_super_request->result_vector, length, client_am_recv_data_complete_callback,
+	ucx_am_recv(am_desc, allgather_super_request->result_vector, length, NULL, client_am_recv_data_complete_callback,
 			allgather_super_request, NULL);
 
-	return 0;
+	return 1;
 }
 
 /** Set default values to the fields of the allgather metrics */
@@ -328,12 +368,23 @@ static void allgather_offloaded_complete_ctrl_send_callback(void *arg, ucs_statu
 	assert(status == UCS_OK);
 }
 
+static void allgather_offloaded_complete_ctrl_xgvmi_send_callback(void *arg, ucs_status_t status)
+{
+	struct ucx_allgather_super_request *allgather_super_request = arg;
+
+	assert(status == UCS_OK);
+
+	free(allgather_super_request->xgvmi_rkeys_buffer);
+}
+
 static size_t allgather_xgvmi_offloaded_batch_submit(size_t vector_size, size_t batch_size)
 {
 	struct ucx_connection *connection = connections[0];
 	struct ucx_allgather_header allgather_header;
 	struct ucx_allgather_super_request *allgather_super_request;
 	size_t op_iter;
+	struct ucx_memh *mem_handle;
+	void *rkey_buffer;
 
 	assert(vector_size <= ucx_app_config.vector_size);
 
@@ -342,15 +393,15 @@ static size_t allgather_xgvmi_offloaded_batch_submit(size_t vector_size, size_t 
 		allgather_header.id = allgather_next_id++;
 
 		allgather_super_request = allgather_super_request_get(&allgather_header, vector_size,
-									preallocated_vector_get());
+									preallocated_vector_get(&mem_handle, &rkey_buffer));
 		if (allgather_super_request == NULL)
 			continue;
 
 		/** Send allgather control Active Message with allgather data to the daemon for futher processing */
 		ucx_am_send(connection, UCX_ALLGATHER_CTRL_XGVMI_AM_ID, &allgather_super_request->header,
-				sizeof(allgather_super_request->header), allgather_super_request->result_vector,
-				vector_size * allgather_datatype_size[ucx_app_config.datatype],
-				allgather_offloaded_complete_ctrl_send_callback, NULL, NULL);
+				sizeof(allgather_super_request->header), allgather_super_request->xgvmi_rkeys_buffer,
+				allgather_super_request->xgvmi_rkeys_buffer_length, NULL,
+				allgather_offloaded_complete_ctrl_xgvmi_send_callback, allgather_super_request, NULL);
 	}
 
 	return op_iter;
@@ -371,14 +422,14 @@ static size_t allgather_offloaded_batch_submit(size_t vector_size, size_t batch_
 		allgather_header.id = allgather_next_id++;
 
 		allgather_super_request = allgather_super_request_get(&allgather_header, vector_size,
-									preallocated_vector_get());
+									preallocated_vector_get(NULL, NULL));
 		if (allgather_super_request == NULL)
 			continue;
 
 		/** Send allgather control Active Message with allgather data to the daemon for futher processing */
 		ucx_am_send(connection, UCX_ALLGATHER_CTRL_AM_ID, &allgather_super_request->header,
 				sizeof(allgather_super_request->header), allgather_super_request->result_vector,
-				vector_size * allgather_datatype_size[ucx_app_config.datatype],
+				vector_size * allgather_datatype_size[ucx_app_config.datatype], NULL,
 				allgather_offloaded_complete_ctrl_send_callback, NULL, NULL);
 	}
 
@@ -400,7 +451,7 @@ static size_t allgather_non_offloaded_batch_submit(size_t vector_size, size_t ba
 		allgather_header.sender_client_id = ucx_app_config.client_id;
 
 		allgather_super_request = allgather_super_request_get(&allgather_header, vector_size,
-									preallocated_vector_get());
+															preallocated_vector_get(NULL, NULL));
 		if (allgather_super_request == NULL)
 			continue;
 

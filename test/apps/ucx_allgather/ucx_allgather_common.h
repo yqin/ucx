@@ -89,6 +89,23 @@ struct ucx_allgather_address {
 struct ucx_allgather_header {
 	size_t id; /*< allgather operation identifier */
 	size_t sender_client_id; /*< Sender client identifier */
+	size_t vector_size;
+};
+
+struct ucx_allgather_xgvmi_key {
+	uint64_t address;
+	size_t length;
+	char rkey_buffer[0];
+};
+
+struct ucx_allgather_xgvmi_buffer {
+	size_t num_keys;
+	struct ucx_allgather_xgvmi_key keys[0];
+};
+
+struct ucx_allgather_xgvmi_memh {
+	uint64_t address;
+	struct ucx_memh *memh;
 };
 
 /** Request of allgather operation which supervises 'ucx_allgather_request' operations which do some parts of complex allgather operation,
@@ -102,6 +119,10 @@ struct ucx_allgather_super_request {
 	void *result_vector; /*< allgather result vector */
 	size_t recv_vector_iter; /*< Indicated how many receive vectors are filled by data received from daemons or clients */
 	void **recv_vectors; /*< Receive vectors to hold */
+	struct ucx_memh **recv_memhs;
+	void **recv_rkey_buffers;
+	void *xgvmi_rkeys_buffer;
+	size_t xgvmi_rkeys_buffer_length;
 	struct ucx_allgather_header header; /*< Header of allgather operation */
 	size_t result_vector_size; /*< Size of the allgather result vector */
 };
@@ -118,6 +139,7 @@ struct ucx_allgather_request {
 	size_t vector_size; /*< Size of a vector which should be send as a part of an allgather operation */
 	struct ucx_allgather_header *headers; /*< Headers which are sent to clients from daemon */
 	size_t num_allgather_operations; /*< How many allgather vectors should be sent to a local clients from daemon */
+	struct ucx_allgather_xgvmi_memh **xgvmi_memhs;
 };
 
 extern const char * const allgather_role_str[];

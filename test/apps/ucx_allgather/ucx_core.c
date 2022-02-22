@@ -77,13 +77,6 @@ struct ucx_am_desc {
 	uint64_t flags; /*< AM operation flags */
 };
 
-struct ucx_memh {
-	ucp_mem_h memh;
-	ucp_rkey_h rkey;
-	void *address;
-	size_t length;
-};
-
 static const char * const ucx_op_str[] = {
 	[UCX_AM_SEND] = "ucp_am_send_nbx", /*< Name of Active Message (AM) send operation */
 	[UCX_AM_RECV_DATA] = "ucp_am_recv_data_nbx" /*< Name of Active Message (AM) receive data operation */
@@ -272,13 +265,13 @@ static void am_send_request_callback(void *request, ucs_status_t status, void *u
 }
 
 static int am_send(struct ucx_connection *connection, unsigned int am_id, int log_err, const void *header,
-			size_t header_length, const void *buffer, size_t length, ucx_callback callback, void *arg,
+			size_t header_length, const void *buffer, size_t length, struct ucx_memh *memh, ucx_callback callback, void *arg,
 			struct ucx_request **request_p)
 {
 	ucp_request_param_t param = {
 		/** Completion callback, user data and flags are specified */
 		.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA | UCP_OP_ATTR_FIELD_FLAGS,
-		/** Send completion callback */
+		/** Send completion callback */	
 		.cb.send = am_send_request_callback,
 		/** User data is the pointer of the connection on which the operation will posted */
 		.user_data = connection,
@@ -287,6 +280,11 @@ static int am_send(struct ucx_connection *connection, unsigned int am_id, int lo
 	};
 	ucs_status_ptr_t status_ptr;
 
+	if (memh != NULL) {
+		param.memh = memh->memh;
+		param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMH;
+	}
+
 	/** Submit AM send operation */
 	status_ptr = ucp_am_send_nbx(connection->ep, am_id, header, header_length, buffer, length, &param);
 	/** Process 'status_ptr' */
@@ -294,9 +292,9 @@ static int am_send(struct ucx_connection *connection, unsigned int am_id, int lo
 }
 
 int ucx_am_send(struct ucx_connection *connection, unsigned int am_id, const void *header, size_t header_length,
-		const void *buffer, size_t length, ucx_callback callback, void *arg, struct ucx_request **request_p)
+		const void *buffer, size_t length, struct ucx_memh *memh, ucx_callback callback, void *arg, struct ucx_request **request_p)
 {
-	return am_send(connection, am_id, 1, header, header_length, buffer, length, callback, arg, request_p);
+	return am_send(connection, am_id, 1, header, header_length, buffer, length, memh, callback, arg, request_p);
 }
 
 /***** Active Message receive operation *****/
@@ -307,7 +305,7 @@ static void am_recv_data_request_callback(void *request, ucs_status_t status, si
 	common_request_callback(request, status, user_data, UCX_AM_RECV_DATA);
 }
 
-int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, ucx_callback callback, void *arg,
+int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, struct ucx_memh *memh, ucx_callback callback, void *arg,
 		struct ucx_request **request_p)
 {
 	struct ucx_connection *connection = am_desc->connection;
@@ -323,6 +321,11 @@ int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, ucx_ca
 	ucs_status_ptr_t status_ptr;
 
 	if (am_desc->flags & UCP_AM_RECV_ATTR_FLAG_RNDV) {
+		if (memh != NULL) {
+			param.memh = memh->memh;
+			param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMH;
+		}
+
 		/** if the received AM descriptor is just a notification about Rendezvous, start receiving the whole data */
 		status_ptr = ucp_am_recv_data_nbx(context->worker, am_desc->data_desc, buffer, length, &param);
 	} else {
@@ -352,22 +355,34 @@ static ucs_status_t am_recv_callback(void *arg, const void *header, size_t heade
 	struct ucx_context *context = callback_info->context;
 	ucp_ep_h ep = param->reply_ep;
 	struct ucx_connection *connection;
-	struct ucx_am_desc am_desc;
+	struct ucx_am_desc *am_desc = calloc(1, sizeof(*am_desc));
+	int ret;
+
+	if (am_desc == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory to hold AM desc");
+		return UCS_ERR_NO_MEMORY;
+	}
 
 	/** Try to find connection in the hash of the connections where key is the UCP EP */
 	connection = g_hash_table_lookup(context->connections_hash, ep);
 	assert(connection != NULL);
 
 	/** Fill AM descriptor which will be passed to the user and used to fetch the data then by 'ucx_am_recv' */
-	am_desc.connection = connection;
-	am_desc.flags = param->recv_attr;
-	am_desc.header = header;
-	am_desc.header_length = header_length;
-	am_desc.data_desc = data_desc;
-	am_desc.length = length;
+	am_desc->connection = connection;
+	am_desc->flags = param->recv_attr;
+	am_desc->header = header;
+	am_desc->header_length = header_length;
+	am_desc->data_desc = data_desc;
+	am_desc->length = length;
 
 	/** Invoke user's callback specified for the AM ID */
-	callback_info->callback(&am_desc);
+	ret = callback_info->callback(am_desc);
+	if (ret == 0) {
+		return UCS_INPROGRESS;
+	}
+
+	free(am_desc);
+
 	return UCS_OK;
 }
 
@@ -692,7 +707,7 @@ int ucx_connect(struct ucx_context *context, const char *dest_ip_str, uint16_t d
 	do {
 		/** If sending AM fails, reconnection will be done form the error callback */
 		request = NULL;
-		ret = am_send(*connection_p, context->max_am_id + 1, 0, &dummy, 0, NULL, 0, NULL, NULL, &request);
+		ret = am_send(*connection_p, context->max_am_id + 1, 0, &dummy, 0, NULL,  0, NULL, NULL, NULL, &request);
 		if (ret == 0)
 			ret = ucx_request_wait(ret, request);
 
@@ -896,14 +911,12 @@ void ucx_progress(struct ucx_context *context)
 	disconnected_connections_progress(context);
 }
 
-#define UCP_MEM_MAP_SHARED 1
-
 struct ucx_memh* ucx_mem_map(struct ucx_context *context, void *address, size_t length, void *rkey_buffer,
 							uint32_t peer_id, int shared)
 {
 	struct ucx_memh *mem_handle;
 	ucp_mem_h memh;
-	ucp_rkey_h rkey;
+	ucp_rkey_h rkey = NULL;
     ucp_mem_map_params_t mparams;
 	ucs_status_t status;
 	ucp_mem_attr_t attr;
@@ -941,7 +954,7 @@ struct ucx_memh* ucx_mem_map(struct ucx_context *context, void *address, size_t 
 		return NULL;
 	}
 
-	mem_handle = malloc(sizeof(mem_handle));
+	mem_handle = malloc(sizeof(*mem_handle));
 	if (mem_handle == NULL) {
 		DOCA_LOG_ERR("failed to allocate memory");
 		return NULL;
@@ -955,7 +968,7 @@ struct ucx_memh* ucx_mem_map(struct ucx_context *context, void *address, size_t 
 	mem_handle->address = attr.address;
 	mem_handle->length = attr.length;
 
-	return memh;
+	return mem_handle;
 }
 
 void ucx_mem_unmap(struct ucx_context *context, struct ucx_memh *memh)
@@ -966,7 +979,7 @@ void ucx_mem_unmap(struct ucx_context *context, struct ucx_memh *memh)
 		ucp_rkey_destroy(memh->rkey);
 	}
 
-	status = ucp_mem_unmap(context->context, memh);
+	status = ucp_mem_unmap(context->context, memh->memh);
 	if (status != UCS_OK) {
 		DOCA_LOG_ERR("failed to deallocate memory: %s", ucs_status_string(status));
 	}
@@ -978,10 +991,7 @@ void* ucx_rkey_pack(struct ucx_context *context, struct ucx_memh *memh, size_t *
 	void *rkey_buffer;
 	ucs_status_t status;
 
-	assert(memh->rkey);
-
 	status = ucp_rkey_pack(context->context, memh->memh, &rkey_buffer, length);
-
 
 	return rkey_buffer;
 }

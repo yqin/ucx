@@ -121,6 +121,23 @@ err:
 
 void allgather_super_request_destroy(struct ucx_allgather_super_request *allgather_super_request)
 {
+	size_t i;
+
+	if ((ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) &&
+		(ucx_app_config.role == UCX_ALLGATHER_CLIENT)) {
+		for (i = 0; i < ucx_app_config.num_clients; ++i) {
+			/*if (allgather_super_request->header.sender_client_id == i) {
+				continue;
+			}*/
+			ucx_rkey_buffer_release(allgather_super_request->recv_rkey_buffers[i]);
+			ucx_mem_unmap(context, allgather_super_request->recv_memhs[i]);
+			allgather_super_request->recv_vectors[i] = NULL;
+		}
+
+		free(allgather_super_request->recv_rkey_buffers);
+		free(allgather_super_request->recv_memhs);
+	}
+
 	if (allgather_super_request->result_vector_owner)
 		free(allgather_super_request->result_vector);
 
@@ -152,6 +169,77 @@ static inline void allgather_datatype_memset(void *vector, size_t length)
 	}
 }
 
+static void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allgather_super_request)
+{
+	size_t i;
+	void *xgvmi_keys_buffer;
+	uint8_t *p;
+	size_t *rkey_buffer_lengths;
+	size_t xgvmi_keys_buffer_length = sizeof(struct ucx_allgather_xgvmi_buffer);
+
+	rkey_buffer_lengths = alloca(sizeof(*rkey_buffer_lengths) * ucx_app_config.num_clients);
+
+	allgather_super_request->recv_memhs = malloc(
+			ucx_app_config.num_clients * sizeof(*allgather_super_request->recv_memhs));
+	if (allgather_super_request->recv_memhs == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory for recv_memhs");
+		return NULL;
+	}
+
+	allgather_super_request->recv_rkey_buffers = malloc(
+			ucx_app_config.num_clients * sizeof(*allgather_super_request->recv_rkey_buffers));
+	if (allgather_super_request->recv_rkey_buffers == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory for recv_rkey_buffers");
+		return NULL;
+	}
+
+	for (i = 0; i < ucx_app_config.num_clients; ++i) {
+		/*if (allgather_super_request->header.sender_client_id == i) {
+			
+			continue;
+		}*/
+
+		allgather_super_request->recv_vectors[i] = ucx_mem_map(context, NULL,
+															allgather_super_request->result_vector_size *
+															allgather_datatype_size[ucx_app_config.datatype],
+															NULL, 0, 1);
+		if (allgather_super_request->recv_vectors[i] == NULL) {
+			DOCA_LOG_ERR("failed to do mem_map");
+			return NULL;
+		}
+
+		allgather_super_request->recv_vectors[i] = allgather_super_request->recv_memhs[i]->address;
+		allgather_super_request->recv_rkey_buffers[i] = ucx_rkey_pack(context, allgather_super_request->recv_memhs[i],
+																	  &rkey_buffer_lengths[i]);
+		xgvmi_keys_buffer_length += rkey_buffer_lengths[i] + sizeof(struct ucx_allgather_xgvmi_key);
+	}
+
+	xgvmi_keys_buffer = malloc(xgvmi_keys_buffer_length);
+	if (xgvmi_keys_buffer == NULL) {
+		DOCA_LOG_ERR("failed to alloc mem for xgvmi_keys_buffer");
+		return NULL;
+	}
+
+	((struct ucx_allgather_xgvmi_buffer*)xgvmi_keys_buffer)->num_keys = ucx_app_config.num_clients;
+	p += sizeof(struct ucx_allgather_xgvmi_buffer);
+
+	for (i = 0; i < ucx_app_config.num_clients; ++i) {
+		((struct ucx_allgather_xgvmi_key*)p)->length = rkey_buffer_lengths[i];
+		((struct ucx_allgather_xgvmi_key*)p)->address = (uint64_t)(uintptr_t)allgather_super_request->recv_vectors[i];
+		p += sizeof(struct ucx_allgather_xgvmi_key);
+
+		memcpy(p, allgather_super_request->recv_rkey_buffers[i], rkey_buffer_lengths[i]);
+		p += rkey_buffer_lengths[i];
+	}
+
+	assert(p == ((uint8_t*)xgvmi_keys_buffer + xgvmi_keys_buffer_length));
+
+	allgather_super_request->xgvmi_rkeys_buffer = xgvmi_keys_buffer;
+	allgather_super_request->xgvmi_rkeys_buffer_length = xgvmi_keys_buffer_length;
+
+	return xgvmi_keys_buffer;
+}
+
 struct ucx_allgather_super_request *
 allgather_super_request_allocate(const struct ucx_allgather_header *header, size_t length, void *result_vector)
 {
@@ -167,6 +255,7 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 	STAILQ_INIT(&allgather_super_request->allgather_requests_list);
 	allgather_super_request->header.id = header->id;
 	allgather_super_request->header.sender_client_id = ucx_app_config.client_id;
+	allgather_super_request->header.vector_size = length;
 	allgather_super_request->num_allgather_requests = 0;
 	/*
 	 * Count required send & receive vectors between us and peers (daemons or non-offloaded clients).
@@ -212,6 +301,11 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 		goto err_result_vector_free;
 	}
 
+	if ((ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) &&
+		(ucx_app_config.role == UCX_ALLGATHER_CLIENT)) {
+		allgather_xgvmi_keys_pack(allgather_super_request);
+	}
+
 	return allgather_super_request;
 
 err_result_vector_free:
@@ -251,6 +345,14 @@ struct ucx_allgather_request *allgather_request_allocate(struct ucx_connection *
 	if (allgather_request->vector == NULL) {
 		DOCA_LOG_ERR("failed to allocate memory for receive vector");
 		goto err_allgather_request_free;
+	}
+
+	if (ucx_app_config.allgather_mode == UCX_ALLGATHER_CTRL_XGVMI_AM_ID) {
+		allgather_request->xgvmi_memhs = malloc(ucx_app_config.num_clients *sizeof(*allgather_request->xgvmi_memhs));
+		if (allgather_request->xgvmi_memhs == NULL) {
+			DOCA_LOG_ERR("failed to allocate memory for xgvmi keys");
+			goto err_allgather_request_free;
+		}
 	}
 
 	allgather_request->vector_size = length / allgather_datatype_size[ucx_app_config.datatype];
@@ -360,7 +462,7 @@ static void allgather_complete_operation_callback(void *arg, ucs_status_t status
 					&allgather_request->headers[i], sizeof(allgather_request->headers[i]),
 					allgather_super_request->recv_vectors[i],
 					allgather_super_request->result_vector_size *
-					allgather_datatype_size[ucx_app_config.datatype],
+					allgather_datatype_size[ucx_app_config.datatype], NULL,
 					daemon_allgather_complete_client_operation_callback, allgather_request, NULL);
 		}
 	}
@@ -380,7 +482,7 @@ void do_allgather(struct ucx_allgather_super_request *allgather_super_request)
 			ucx_am_send(connections[i], UCX_ALLGATHER_OP_AM_ID, &allgather_super_request->header,
 					sizeof(allgather_super_request->header), allgather_super_request->result_vector,
 					allgather_super_request->result_vector_size *
-					allgather_datatype_size[ucx_app_config.datatype],
+					allgather_datatype_size[ucx_app_config.datatype], NULL,
 					allgather_complete_operation_callback, allgather_super_request, NULL);
 		}
 	} else {
@@ -393,12 +495,21 @@ void do_allgather(struct ucx_allgather_super_request *allgather_super_request)
 
 				allgather_request->headers[i].id = allgather_super_request->header.id;
 				allgather_request->headers[i].sender_client_id = client_id;
+				allgather_request->headers[i].vector_size = allgather_super_request->result_vector_size;
 				//fprintf(stderr, "SENDING %zu\n", allgather_super_request->header.sender_client_id);
-				ucx_am_send(connections[i], UCX_ALLGATHER_OP_AM_ID, &allgather_request->headers[i],
-						sizeof(allgather_request->headers[i]), allgather_super_request->recv_vectors[client_id],
-						allgather_super_request->result_vector_size *
-						allgather_datatype_size[ucx_app_config.datatype],
-						allgather_complete_operation_callback, allgather_super_request, NULL);
+				if (ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
+					ucx_am_send(connections[i], UCX_ALLGATHER_OP_AM_ID, &allgather_request->headers[i],
+							sizeof(allgather_request->headers[i]), (void*)(uintptr_t)allgather_request->xgvmi_memhs[client_id]->address,
+							allgather_super_request->result_vector_size *
+							allgather_datatype_size[ucx_app_config.datatype], allgather_request->xgvmi_memhs[client_id]->memh,
+							allgather_complete_operation_callback, allgather_super_request, NULL);
+				} else {
+					ucx_am_send(connections[i], UCX_ALLGATHER_OP_AM_ID, &allgather_request->headers[i],
+								sizeof(allgather_request->headers[i]), allgather_super_request->recv_vectors[client_id],
+                                allgather_super_request->result_vector_size *
+                                allgather_datatype_size[ucx_app_config.datatype], NULL,
+                                allgather_complete_operation_callback, allgather_super_request, NULL);
+				}
 			}
 		}
 	}
@@ -443,6 +554,6 @@ int am_recv_allgather_op_callback(struct ucx_am_desc *am_desc)
 	allgather_vector_received(allgather_header, allgather_super_request, vector);
 
 	/** Continue receiving data to the allocated vector */
-	ucx_am_recv(am_desc, vector, length, allgather_complete_operation_callback, allgather_super_request, NULL);
-	return 0;
+	ucx_am_recv(am_desc, vector, length, NULL, allgather_complete_operation_callback, allgather_super_request, NULL);
+	return 1;
 }

@@ -50,7 +50,13 @@ struct ucx_context;
 struct ucx_connection;
 struct ucx_request;
 struct ucx_am_desc;
-struct ucx_memh;
+
+struct ucx_memh {
+	ucp_mem_h memh;
+	ucp_rkey_h rkey;
+	void *address;
+	size_t length;
+};
 
 typedef void (*ucx_callback)(void *arg, ucs_status_t status);
 typedef int (*ucx_am_callback)(struct ucx_am_desc *am_desc);
@@ -64,11 +70,12 @@ void ucx_request_release(struct ucx_request *request);
 /***** Active Message send operation *****/
 
 int ucx_am_send(struct ucx_connection *connection, unsigned int am_id, const void *header, size_t header_length,
-		const void *buffer, size_t length, ucx_callback callback, void *arg, struct ucx_request **request_p);
+		const void *buffer, size_t length, struct ucx_memh *memh, ucx_callback callback, void *arg,
+		struct ucx_request **request_p);
 
 /***** Active Message receive operation *****/
 
-int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, ucx_callback callback, void *arg,
+int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, struct ucx_memh *memh, ucx_callback callback, void *arg,
 		struct ucx_request **request_p);
 
 void ucx_am_desc_query(struct ucx_am_desc *am_desc, struct ucx_connection **connection, const void **header,
