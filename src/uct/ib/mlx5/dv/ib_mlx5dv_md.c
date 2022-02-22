@@ -689,8 +689,8 @@ static int uct_ib_mlx5_is_xgvmi_alias_supported(struct ibv_context *ctx)
     object_for_other_vhca = UCT_IB_MLX5DV_GET64(
             cmd_hca_cap_2, cap, allowed_object_for_other_vhca_access);
 
-    ucs_info("object_to_object=0x%x object_for_other_vhca=0x%lx",
-             object_to_object, object_for_other_vhca);
+    ucs_print("object_to_object=0x%x object_for_other_vhca=0x%lx",
+              object_to_object, object_for_other_vhca);
 
     return (object_to_object & UCS_BIT(8) /* Mkey */) &&
            (object_for_other_vhca & UCS_BIT(2) /* Mkey */);
@@ -1209,7 +1209,6 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
     struct mlx5dv_obj dv                                      = {{0}};
     void *hdr       = UCT_IB_MLX5DV_ADDR_OF(create_alias_obj_in, in, hdr);
     void *alias_ctx = UCT_IB_MLX5DV_ADDR_OF(create_alias_obj_in, in, alias_ctx);
-    ucs_status_t status;
     void *access_key;
     int rc;
 
@@ -1240,8 +1239,7 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
     if (memh->cross_mr == NULL) {
         ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
                   UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.syndrome));
-        status = UCT_IB_MLX5DV_GET(create_alias_obj_out, out, alias_ctx.status);
-        return status;
+        return UCS_ERR_IO_ERROR;
     }
 
     memh->super.lkey = (UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.obj_id)
