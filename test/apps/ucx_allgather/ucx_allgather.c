@@ -162,8 +162,12 @@ static void set_allgather_mode_param(void *config, void *param)
 		APP_EXIT("unknow mode '%s' was specified", str);
 }
 
+int doca_print_enable = 0;
 static void set_default_config_params(void)
 {
+	if (getenv("DOCA_PRINT") != NULL) {
+		doca_print_enable = 1;
+	}
 	ucx_app_config.vector_size = 65535;
 	ucx_app_config.datatype = UCX_ALLGATHER_FLOAT;
 	ucx_app_config.role = UCX_ALLGATHER_CLIENT;

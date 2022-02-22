@@ -68,15 +68,6 @@ struct ucx_request {
 	enum ucx_op op; /*< Operation type */
 };
 
-struct ucx_am_desc {
-	struct ucx_connection *connection; /*< Pointer to the connection on which this AM operation was received */
-	const void *header; /*< Header got from AM callback */
-	size_t header_length; /*< Length of the header got from AM callback */
-	void *data_desc; /*< Pointer to the descriptor got from AM callback. In case of Rendezvous, it is not the actual data, but only a data descriptor */
-	size_t length; /*< Length of the received data */
-	uint64_t flags; /*< AM operation flags */
-};
-
 static const char * const ucx_op_str[] = {
 	[UCX_AM_SEND] = "ucp_am_send_nbx", /*< Name of Active Message (AM) send operation */
 	[UCX_AM_RECV_DATA] = "ucp_am_recv_data_nbx" /*< Name of Active Message (AM) receive data operation */
@@ -271,7 +262,7 @@ static int am_send(struct ucx_connection *connection, unsigned int am_id, int lo
 	ucp_request_param_t param = {
 		/** Completion callback, user data and flags are specified */
 		.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA | UCP_OP_ATTR_FIELD_FLAGS,
-		/** Send completion callback */	
+		/** Send completion callback */
 		.cb.send = am_send_request_callback,
 		/** User data is the pointer of the connection on which the operation will posted */
 		.user_data = connection,
@@ -281,10 +272,12 @@ static int am_send(struct ucx_connection *connection, unsigned int am_id, int lo
 	ucs_status_ptr_t status_ptr;
 
 	if (memh != NULL) {
-		DOCA_LOG_INFO("send_nbx: memh - %p", memh->memh);
 		param.memh = memh->memh;
 		param.op_attr_mask |= UCP_OP_ATTR_FIELD_MEMH;
 	}
+
+	DOCA_LOG_DBG("am_send am_id=%u hdr=%p hdrlen=%zu buffer=%p buflen=%zu memh=%p",
+	              am_id, header, header_length, buffer, length, memh ? memh->memh : NULL);
 
 	/** Submit AM send operation */
 	status_ptr = ucp_am_send_nbx(connection->ep, am_id, header, header_length, buffer, length, &param);
@@ -321,6 +314,10 @@ int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, struct
 	};
 	ucs_status_ptr_t status_ptr;
 
+	DOCA_LOG_DBG("ucx_am_recv buffer=%p length=%zu memh=%p am_desc %p ->flags=0x%x ->len=%zu ->data=%p",
+				  buffer, length, memh ? memh->memh : NULL, am_desc, am_desc->flags,
+				  am_desc->length, am_desc->data_desc);
+
 	if (am_desc->flags & UCP_AM_RECV_ATTR_FLAG_RNDV) {
 		if (memh != NULL) {
 			param.memh = memh->memh;
@@ -334,6 +331,7 @@ int ucx_am_recv(struct ucx_am_desc *am_desc, void *buffer, size_t length, struct
 		status_ptr = NULL;
 		memcpy(buffer, am_desc->data_desc, MIN(length, am_desc->length));
 	}
+
 
 	/** Process 'status_ptr' */
 	return request_process(connection, UCX_AM_RECV_DATA, status_ptr, callback, arg, 1, request_p);

@@ -46,8 +46,9 @@ enum ucx_allgather_am_id {
 	/*< Exchanged by clients or daemons to perform allgather operations */
 	UCX_ALLGATHER_OP_AM_ID = 1,
 	UCX_ALLGATHER_CTRL_XGVMI_AM_ID = 2,
+	UCX_ALLGATHER_CTRL_XGVMI_DONE_AM_ID = 3,
 	/*< Maximum AM identifier used by the application */
-	UCX_ALLGATHER_MAX_AM_ID = UCX_ALLGATHER_CTRL_XGVMI_AM_ID
+	UCX_ALLGATHER_MAX_AM_ID = UCX_ALLGATHER_CTRL_XGVMI_DONE_AM_ID
 };
 
 enum ucx_allgather_datatype {
@@ -69,6 +70,7 @@ struct ucx_allgather_config {
 	size_t batch_size; /*< Number of allgather operations to submit simultaneously and wait compeltion for */
 	size_t num_batches; /*< Indicates how many batches should be performed by clients */
 	enum ucx_allgather_mode allgather_mode; /*< allgather algorithm which should be used */
+	int doca_print_enable;
 	struct {
 		union {
 			/*< Valid after calling dest_addresses_init() */
@@ -106,6 +108,7 @@ struct ucx_allgather_xgvmi_buffer {
 struct ucx_allgather_xgvmi_memh {
 	uint64_t address;
 	struct ucx_memh *memh;
+	int done;
 };
 
 /** Request of allgather operation which supervises 'ucx_allgather_request' operations which do some parts of complex allgather operation,
@@ -120,6 +123,7 @@ struct ucx_allgather_super_request {
 	size_t recv_vector_iter; /*< Indicated how many receive vectors are filled by data received from daemons or clients */
 	void **recv_vectors; /*< Receive vectors to hold */
 	struct ucx_memh **recv_memhs;
+	STAILQ_HEAD(am_descs, ucx_am_desc) am_desc_list;
 	void **recv_rkey_buffers;
 	void *xgvmi_rkeys_buffer;
 	size_t xgvmi_rkeys_buffer_length;
@@ -177,7 +181,9 @@ allgather_super_request_get(const struct ucx_allgather_header *allgather_header,
 		/** Insert the allocated allgather super request to the hash */
 		g_hash_table_insert(allgather_super_requests_hash, &allgather_super_request->header.id,
 							allgather_super_request);
+		DOCA_LOG_DBG("added new allgather %zu to hash", allgather_header->id);
 	} else {
+		DOCA_LOG_DBG("found allgather %zu in hash", allgather_header->id);
 		allgather_super_request->header.sender_client_id = ucx_app_config.client_id;
 	}
 
@@ -217,5 +223,7 @@ void allgather_request_destroy(struct ucx_allgather_request *allgather_request);
 struct ucx_allgather_request *allgather_request_allocate(struct ucx_connection *connection,
 							const struct ucx_allgather_header *header, int ret,
 							struct ucx_request *request, size_t length);
+
+void allgather_recv_complete_callback(void *arg, ucs_status_t status);
 
 #endif /** UCX_ALLGATHER_COMMON_H_ */

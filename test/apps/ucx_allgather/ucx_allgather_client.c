@@ -20,6 +20,7 @@ struct ucx_allgather_metrics {
 	double max; /*< Maximum time of doing allgather batch, in seconds */
 	double avg; /*< Average time of doing allgather batch, in seconds */
 	double total; /*< Total time of doing all allgather batches, in seconds */
+	double submit_time;
 	size_t current_batch_iter; /*< Current batch iteration number */
 	const char *mode_str; /*< Pointer to the string of allgather mode */
 	const char *datatype_str; /*< Pointer to the string of allgather datatype */
@@ -188,6 +189,33 @@ int client_am_recv_ctrl_callback(struct ucx_am_desc *am_desc)
 	return 1;
 }
 
+int client_am_recv_ctrl_xgvmi_done_callback(struct ucx_am_desc *am_desc)
+{
+	struct ucx_connection *connection;
+	const struct ucx_allgather_header *allgather_header;
+	struct ucx_allgather_super_request *allgather_super_request;
+	size_t header_length, length;
+
+	ucx_am_desc_query(am_desc, &connection, (const void **)&allgather_header, &header_length, &length);
+
+	assert(sizeof(*allgather_header) == header_length);
+	assert(length == 0);
+
+	allgather_super_request = g_hash_table_lookup(allgather_super_requests_hash, &allgather_header->id);
+	if (allgather_super_request == NULL) {
+		DOCA_LOG_ERR("failed to find allgather request with id=%zu in hash", allgather_header->id);
+		return -1;
+	}
+
+	DOCA_LOG_DBG("completed allgather request id=%ld", allgather_header->id);
+
+	/** Continue receiving data to the allocated vector */
+	ucx_am_recv(am_desc, NULL, 0, NULL, client_am_recv_data_complete_callback,
+				allgather_super_request, NULL);
+
+	return 1;
+}
+
 /** Set default values to the fields of the allgather metrics */
 static void allgather_metrics_reset(struct ucx_allgather_metrics *allgather_metrics)
 {
@@ -195,6 +223,7 @@ static void allgather_metrics_reset(struct ucx_allgather_metrics *allgather_metr
 	allgather_metrics->max = 0.;
 	allgather_metrics->total = 0.;
 	allgather_metrics->avg = 0.;
+	allgather_metrics->submit_time = 0.;
 	allgather_metrics->current_batch_iter = 0;
 	allgather_metrics->mode_str = allgather_mode_str[ucx_app_config.allgather_mode];
 	allgather_metrics->datatype_str = allgather_datatype_str[ucx_app_config.datatype];
@@ -208,7 +237,7 @@ static void allgather_metrics_reset(struct ucx_allgather_metrics *allgather_metr
 
 /** Calculate allgather metrics after allgather batch successfully done */
 static void
-allgather_metrics_calculate(double run_time, double compute_time,
+allgather_metrics_calculate(double run_time, double compute_time, double submit_time,
 				struct ucx_allgather_metrics *allgather_metrics)
 {
 	double overlapped_time, max_possible_overlapped_time;
@@ -223,6 +252,8 @@ allgather_metrics_calculate(double run_time, double compute_time,
 
 	/** Total run time */
 	allgather_metrics->total += run_time;
+
+	allgather_metrics->submit_time += submit_time;
 
 	/** Average run time */
 	allgather_metrics->avg = allgather_metrics->total / (allgather_metrics->current_batch_iter + 1);
@@ -343,7 +374,7 @@ static void cpu_exploit(struct ucx_allgather_metrics *allgather_metrics)
 static void allgather_metrics_iteration_print(double run_time, double compute_time,
 						struct ucx_allgather_metrics *allgather_metrics)
 {
-	DOCA_LOG_INFO("%zu: current run time - %.3f seconds, compute - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds\n",
+	DOCA_LOG_DBG("%zu: current run time - %.3f seconds, compute - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds\n",
 		allgather_metrics->current_batch_iter, run_time, compute_time, allgather_metrics->min, allgather_metrics->max,
 		allgather_metrics->avg);
 }
@@ -358,6 +389,7 @@ allgather_metrics_print(struct ucx_allgather_metrics *allgather_metrics)
 	DOCA_LOG_INFO("max - %.3f seconds\n", allgather_metrics->max);
 	DOCA_LOG_INFO("avg - %.3f seconds\n", allgather_metrics->avg);
 	DOCA_LOG_INFO("total - %.3f seconds\n", allgather_metrics->total);
+	DOCA_LOG_INFO("submit avg - %.3f seconds\n", allgather_metrics->submit_time / allgather_metrics->current_batch_iter);
 	DOCA_LOG_INFO("computation time - %.3f seconds\n", allgather_metrics->compute_time);
 	DOCA_LOG_INFO("pure network time - %.3f seconds\n", allgather_metrics->network_time);
 	DOCA_LOG_INFO("computation and communication overlap - %.2f%%\n", allgather_metrics->overlap);
@@ -513,7 +545,7 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 	struct ucx_allgather_metrics allgather_metrics;
 	size_t batch_size = ucx_app_config.batch_size;
 	double start_time, end_time, run_time;
-	double compute_start_time, compute_end_time, compute_time;
+	double compute_start_time, compute_end_time, compute_time, submit_time;
 
 	/** Post a barrier to make sure all clients and daemons are up and running prior benchmarking to avoid imbalance */
 	allgather_barrier(batch_submit_func);
@@ -521,8 +553,10 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 	allgather_metrics_init(&allgather_metrics, batch_submit_func);
 
 	/** Do benchmarking of allgather */
+	DOCA_LOG_DBG("NUM_ITERS: %zu", ucx_app_config.num_batches);
 	for (allgather_metrics.current_batch_iter = 0; allgather_metrics.current_batch_iter < ucx_app_config.num_batches;
 			++allgather_metrics.current_batch_iter) {
+		DOCA_LOG_DBG("ITER: %zu", allgather_metrics.current_batch_iter);
 		/** Reset vectors by initial data prior submitting allgather */
 		allgather_vectors_reset();
 
@@ -538,9 +572,10 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 
 		end_time = get_time();
 		run_time = end_time - start_time;
+		submit_time = compute_start_time - start_time;
 
 		/** Calculate allgather metrics and print metrics of the current iteration */
-		allgather_metrics_calculate(run_time, compute_time, &allgather_metrics);
+		allgather_metrics_calculate(run_time, compute_time, submit_time, &allgather_metrics);
 		allgather_metrics_iteration_print(run_time, compute_time, &allgather_metrics);
 
 		allgather_barrier(batch_submit_func);
@@ -561,6 +596,7 @@ void client_run(void)
 
 	/** Setup receive handler for AM control messages from daemon which carry the allgather result */
 	ucx_am_set_recv_handler(context, UCX_ALLGATHER_CTRL_AM_ID, client_am_recv_ctrl_callback);
+	ucx_am_set_recv_handler(context, UCX_ALLGATHER_CTRL_XGVMI_DONE_AM_ID, client_am_recv_ctrl_xgvmi_done_callback);
 
 	/** Initialize needed stuff for the client */
 	num_connections = process_init();

@@ -97,6 +97,8 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 	struct ucx_allgather_xgvmi_buffer *xgvmi_buffer;
 	struct ucx_allgather_xgvmi_key *xgvmi_key;
 	uint8_t *p;
+	struct ucx_am_desc *am_desc, *tmp_am_desc;
+	struct ucx_allgather_header *allgather_header;
 
 	assert(status == UCS_OK);
 
@@ -107,8 +109,13 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 		return;
 	}
 
+	if (ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
+		allgather_super_request->result_vector_size = ucx_app_config.vector_size;
+	}
+
 	/** Parse XGVMI keys */
-	p = xgvmi_buffer = allgather_request->vector;
+	xgvmi_buffer = allgather_request->vector;
+	p = (uint8_t*)xgvmi_buffer;
 	assert(xgvmi_buffer->num_keys == ucx_app_config.num_clients);
 	p += sizeof(*xgvmi_buffer);
 	for (i = 0; i < xgvmi_buffer->num_keys; ++i) {
@@ -119,9 +126,10 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 			continue;
 		}
 
-		DOCA_LOG_INFO("%zu: unpack length - %zu, addr - %p", i, xgvmi_key->length,
+		DOCA_LOG_DBG("%zu: unpack length - %zu, addr - %p", i, xgvmi_key->length,
 						(void*)xgvmi_key->address);
 
+		allgather_request->xgvmi_memhs[i]->done = 0;
 		allgather_request->xgvmi_memhs[i]->address = xgvmi_key->address;
 		allgather_request->xgvmi_memhs[i]->memh =
 				ucx_mem_map(context, (void*)(uintptr_t)allgather_request->xgvmi_memhs[i]->address,
@@ -133,7 +141,7 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 	/** Attach the received allgather request to the allgather super request for futher processing */
 	allgather_request->allgather_super_request = allgather_super_request;
 	++allgather_super_request->num_allgather_requests;
-	DOCA_LOG_INFO("num_allgather_requests=%zu num_daemon_bound_clients=%zu",
+	DOCA_LOG_DBG("num_allgather_requests=%zu num_daemon_bound_clients=%zu",
 	              allgather_super_request->num_allgather_requests,
 				  ucx_app_config.num_daemon_bound_clients);
 	allgather_vector_received(&allgather_request->header, allgather_super_request, allgather_request->vector);
@@ -144,6 +152,24 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 
 	/*free(allgather_request->vector);
 	allgather_request->vector = NULL;*/
+
+	STAILQ_FOREACH_SAFE(am_desc, &allgather_super_request->am_desc_list, entry, tmp_am_desc) {
+		allgather_header = (struct ucx_allgather_header*)am_desc->header;
+		if (allgather_request->xgvmi_memhs[allgather_header->sender_client_id]->done) {
+			DOCA_LOG_DBG("client id %zu: already receuved", allgather_header->sender_client_id);
+			continue;
+		}
+
+		DOCA_LOG_DBG("found %zu: recv: header_length %zu length %zu - to addr=%p",
+						allgather_header->sender_client_id, am_desc->header_length, am_desc->length,
+						(void*)allgather_request->xgvmi_memhs[allgather_header->sender_client_id]->address);
+		ucx_am_recv(am_desc, (void*)allgather_request->xgvmi_memhs[allgather_header->sender_client_id]->address,
+					am_desc->length, allgather_request->xgvmi_memhs[allgather_header->sender_client_id]->memh,
+					allgather_recv_complete_callback, allgather_super_request, NULL);
+		allgather_request->xgvmi_memhs[allgather_header->sender_client_id]->done = 1;
+
+		STAILQ_REMOVE(&allgather_super_request->am_desc_list, am_desc, ucx_am_desc, entry);
+	}
 
 	if (allgather_super_request->num_allgather_requests == ucx_app_config.num_daemon_bound_clients) {
 		/*
@@ -208,7 +234,7 @@ void daemon_run(void)
 
 	if (ucx_app_config.num_daemon_bound_clients == 0) {
 		/** Nothing to do */
-		DOCA_LOG_INFO("stop running - daemon doesn't have clients");
+		DOCA_LOG_DBG("stop running - daemon doesn't have clients");
 		return;
 	}
 

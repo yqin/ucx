@@ -11,10 +11,16 @@
  *
  */
 
-#include <ucp/api/ucp.h>
+
 
 #ifndef UCX_CORE_H_
 #define UCX_CORE_H_
+
+#include <ucp/api/ucp.h>
+
+#include <sys/queue.h>
+
+extern int doca_print_enable;
 
 #ifndef STAILQ_FOREACH_SAFE
 #define STAILQ_FOREACH_SAFE(_node, _list, _name, _temp_node) \
@@ -29,22 +35,26 @@
 #define DOCA_LOG_REGISTER(_name)
 
 #define DOCA_LOG_ERR(_fmt, ...) \
-do { \
-	fprintf(stderr, _fmt"\n", ## __VA_ARGS__); \
-	exit(0); \
-} while (0)
+	if (doca_print_enable) { \
+		fprintf(stderr, "ERROR "_fmt"\n", ## __VA_ARGS__); \
+		exit(0); \
+	}
 
 #define DOCA_LOG_DBG(_fmt, ...) \
-	fprintf(stderr, _fmt"\n", ## __VA_ARGS__)
+	if (doca_print_enable) { \
+		fprintf(stderr, "DEBUG " _fmt"\n", ## __VA_ARGS__); \
+	}
 
 #define DOCA_LOG_INFO(_fmt, ...) \
-	fprintf(stderr, _fmt"\n", ## __VA_ARGS__)
+	if (1) { \
+		fprintf(stderr, "INFO  " _fmt"\n", ## __VA_ARGS__); \
+	}
 
 #define APP_EXIT(_fmt, ...) \
-do { \
-	fprintf(stderr, _fmt"\n", ## __VA_ARGS__); \
-	exit(-1); \
-} while (0)
+	do { \
+		fprintf(stderr, "EXIT  " _fmt"\n", ## __VA_ARGS__); \
+		exit(-1); \
+	} while (0)
 
 struct ucx_context;
 struct ucx_connection;
@@ -56,6 +66,17 @@ struct ucx_memh {
 	ucp_rkey_h rkey;
 	void *address;
 	size_t length;
+};
+
+
+struct ucx_am_desc {
+	STAILQ_ENTRY(ucx_am_desc) entry;
+	struct ucx_connection *connection; /*< Pointer to the connection on which this AM operation was received */
+	const void *header; /*< Header got from AM callback */
+	size_t header_length; /*< Length of the header got from AM callback */
+	void *data_desc; /*< Pointer to the descriptor got from AM callback. In case of Rendezvous, it is not the actual data, but only a data descriptor */
+	size_t length; /*< Length of the received data */
+	uint64_t flags; /*< AM operation flags */
 };
 
 typedef void (*ucx_callback)(void *arg, ucs_status_t status);
