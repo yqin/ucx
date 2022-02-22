@@ -274,7 +274,7 @@ ucp_mem_map_params2uct_flags(const ucp_mem_map_params_t *params)
         }
 
         if (params->flags & UCP_MEM_MAP_SHARED) {
-            flags |= UCT_MD_FLAG_SHARED_RKEY;
+            flags |= UCT_MD_MEM_FLAG_SHARED_RKEY;
         }
     }
 
@@ -316,7 +316,7 @@ static void ucp_memh_cleanup(ucp_context_h context, ucp_mem_h memh,
                              size_t length, ucp_md_index_t md_index,
                              unsigned uct_flags, ucs_status_t status)
 {
-    int shared_memh = uct_flags & UCT_MD_FLAG_SHARED_RKEY;
+    int shared_memh = uct_flags & UCT_MD_MEM_FLAG_SHARED_RKEY;
     ucs_log_level_t log_level;
 
     log_level = (uct_flags & UCT_MD_MEM_FLAG_HIDE_ERRORS) ?
@@ -350,7 +350,7 @@ static ucs_status_t ucp_memh_register(ucp_context_h context, ucp_mem_h memh,
     ucs_for_each_bit(md_index, md_map) {
         md_attr = &context->tl_mds[md_index].attr;
 
-        if (uct_flags & UCT_MD_FLAG_SHARED_RKEY) {
+        if (uct_flags & UCT_MD_MEM_FLAG_SHARED_RKEY) {
             ucs_assert_always(memh->peer_id != UCP_NULL_RESOURCE);
 
             if (!(md_attr->cap.flags & UCT_MD_FLAG_SHARED_RKEY)) {
@@ -385,7 +385,7 @@ static ucs_status_t ucp_memh_register(ucp_context_h context, ucp_mem_h memh,
     }
 
     ucs_print("Registered %s memh, mdmap 0x%lx (cur 0x%lx) gvmi %d",
-              ((uct_flags & UCT_MD_FLAG_SHARED_RKEY) ? "shared":""),
+              ((uct_flags & UCT_MD_MEM_FLAG_SHARED_RKEY) ? "shared":""),
               md_map_registered,memh->md_map,  memh->peer_id);
 
     memh->md_map |= md_map_registered;
