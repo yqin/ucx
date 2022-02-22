@@ -594,6 +594,7 @@ ucs_status_t ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t *para
     unsigned flags;
     void *address;
     ucp_rkey_h rkey;
+    ucp_rsc_index_t peer_id;
 
     /* always acquire context lock */
     UCP_THREAD_CS_ENTER(&context->mt_lock);
@@ -608,6 +609,7 @@ ucs_status_t ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t *para
     address = UCP_PARAM_VALUE(MEM_MAP, params, address, ADDRESS, NULL);
     flags   = UCP_PARAM_VALUE(MEM_MAP, params, flags, FLAGS, 0);
     rkey    = UCP_PARAM_VALUE(MEM_MAP, params, rkey, RKEY, NULL);
+    peer_id = UCP_PARAM_VALUE(MEM_MAP, params, peer_id, PEER_ID, UCP_NULL_RESOURCE);
 
     if ((flags & UCP_MEM_MAP_FIXED) &&
         ((uintptr_t)address % ucs_get_page_size())) {
@@ -669,12 +671,12 @@ ucs_status_t ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t *para
     if (ucp_mem_map_is_allocate(params)) {
         status = ucp_memh_alloc(context, address, params->length, memory_type,
                                 ucp_mem_map_params2uct_flags(params),
-                                "user memory", rkey, params->peer_id, memh_p);
+                                "user memory", rkey, peer_id, memh_p);
     } else {
         status = ucp_memh_get(context, address, params->length, memory_type,
                               context->reg_md_map[memory_type],
                               ucp_mem_map_params2uct_flags(params),
-                              rkey, params->peer_id, memh_p);
+                              rkey, peer_id, memh_p);
     }
 
 out:
