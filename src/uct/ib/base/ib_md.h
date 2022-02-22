@@ -339,7 +339,7 @@ typedef ucs_status_t (*uct_ib_md_get_atomic_mr_id_func_t)(uct_ib_md_t *md,
  *
  * @return UCS_OK on success or error code in case of failure.
  */
-typedef ucs_status_t (*uct_ib_md_reg_crossed_key_func_t)(uct_ib_md_t *ib_md,
+typedef ucs_status_t (*uct_ib_md_reg_shared_key_func_t)(uct_ib_md_t *ib_md,
                                                          void *address,
                                                          size_t length,
                                                          uint32_t allowed_gvmi_id,
@@ -363,7 +363,7 @@ typedef ucs_status_t (*uct_ib_md_reg_crossed_key_func_t)(uct_ib_md_t *ib_md,
  *
  * @return UCS_OK on success or error code in case of failure.
  */
-typedef ucs_status_t (*uct_ib_md_reg_crossing_key_func_t)(uct_ib_md_t *ib_md,
+typedef ucs_status_t (*uct_ib_md_import_shared_key_func_t)(uct_ib_md_t *ib_md,
                                                           uint32_t target_gvmi_id,
                                                           uint32_t target_mkey,
                                                           uct_ib_mem_t *ib_memh);
@@ -379,8 +379,8 @@ typedef struct uct_ib_md_ops {
     uct_ib_md_dereg_multithreaded_func_t dereg_multithreaded;
     uct_ib_md_mem_prefetch_func_t        mem_prefetch;
     uct_ib_md_get_atomic_mr_id_func_t    get_atomic_mr_id;
-    uct_ib_md_reg_crossed_key_func_t     reg_crossed_key;
-    uct_ib_md_reg_crossing_key_func_t    reg_crossing_key;
+    uct_ib_md_reg_shared_key_func_t      reg_shared_key;
+    uct_ib_md_import_shared_key_func_t   import_shared_key;
 } uct_ib_md_ops_t;
 
 

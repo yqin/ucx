@@ -28,8 +28,8 @@ typedef union uct_ib_mlx5_mr {
 
 typedef enum {
     UCT_IB_MLX5_MEM_REG,
-    UCT_IB_MLX5_MEM_CROSSED,
-    UCT_IB_MLX5_MEM_CROSSING
+    UCT_IB_MLX5_MEM_SHARED,
+    UCT_IB_MLX5_MEM_IMPORTED
 } uct_ib_mlx5_mem_type_t;
 
 typedef struct uct_ib_mlx5_mem {
@@ -70,7 +70,7 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
     switch (memh->type) {
     case UCT_IB_MLX5_MEM_REG:
         return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
-    case UCT_IB_MLX5_MEM_CROSSED:
+    case UCT_IB_MLX5_MEM_SHARED:
         if (mr_type != UCT_IB_MR_DEFAULT) {
             return UCS_OK;
         }
@@ -86,7 +86,7 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
             return UCS_ERR_IO_ERROR;
         }
         return UCS_OK;
-    case UCT_IB_MLX5_MEM_CROSSING:
+    case UCT_IB_MLX5_MEM_IMPORTED:
         if (mr_type != UCT_IB_MR_DEFAULT) {
             return UCS_OK;
         }
@@ -655,6 +655,47 @@ close_ctx:
 
 static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops;
 
+
+static int uct_ib_mlx5_is_xgvmi_alias_supported(struct ibv_context *ctx)
+{
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(query_hca_cap_out)] = {};
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(query_hca_cap_in)]   = {};
+    uint64_t object_for_other_vhca;
+    uint32_t object_to_object;
+    void *cap;
+    int ret;
+
+    cap = UCT_IB_MLX5DV_ADDR_OF(query_hca_cap_out, out, capability);
+
+    /* query HCA CAP 2 */
+    UCT_IB_MLX5DV_SET(query_hca_cap_in, in, opcode,
+                      UCT_IB_MLX5_CMD_OP_QUERY_HCA_CAP);
+    UCT_IB_MLX5DV_SET(query_hca_cap_in, in, op_mod,
+                      UCT_IB_MLX5_HCA_CAP_OPMOD_GET_CUR |
+                              (UCT_IB_MLX5_CAP_2_GENERAL << 1));
+    ret = mlx5dv_devx_general_cmd(ctx, in, sizeof(in), out, sizeof(out));
+    if (ret != 0) {
+        if ((errno == EPERM) || (errno == EPROTONOSUPPORT) ||
+            (errno == EOPNOTSUPP)) {
+            ucs_error("mlx5dv_devx_general_cmd(QUERY_HCA_CAP) failed: %m");
+        } else {
+            ucs_error("mlx5dv_devx_general_cmd(QUERY_HCA_CAP) failed: %m");
+        }
+        return 0;
+    }
+
+    object_to_object      = UCT_IB_MLX5DV_GET(cmd_hca_cap_2, cap,
+                                              cross_vhca_object_to_object_supported);
+    object_for_other_vhca = UCT_IB_MLX5DV_GET64(
+            cmd_hca_cap_2, cap, allowed_object_for_other_vhca_access);
+
+    ucs_print("object_to_object=0x%x object_for_other_vhca=0x%lx",
+              object_to_object, object_for_other_vhca);
+
+    return (object_to_object & UCS_BIT(8) /* Mkey */) &&
+           (object_for_other_vhca & UCS_BIT(2) /* Mkey */);
+}
+
 static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
                                              const uct_ib_md_config_t *md_config,
                                              uct_ib_md_t **p_md)
@@ -790,20 +831,7 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
     }
 
     md->super.vhca_id = UCT_IB_MLX5DV_GET(cmd_hca_cap, cap, vhca_id);
-    // ucs_warn("%s: vhca_id is %d. at b4h: 0x%x; 0x%x", uct_ib_device_name(dev),
-    //          UCT_IB_MLX5DV_GET(cmd_hca_cap, cap, vhca_id),
-    //          ntohl(*(uint32_t*)UCS_PTR_BYTE_OFFSET(cap, 0xB4)),
-    //          ntohl(*(uint32_t*)UCS_PTR_BYTE_OFFSET(cap, 0xB4)) & (1<<13)
-    //          );
 
-    if (UCT_IB_MLX5DV_GET(cmd_hca_cap, cap,
-                          crossing_vhca_mkey)) {
-        ucs_info("%s: vhca_id=%d crossing_vhca_mkey is supported",
-                 uct_ib_device_name(dev), md->super.vhca_id);
-    } else {
-        ucs_info("%s: vhca_id=%d crossing_vhca_mkey is not supported",
-                 uct_ib_device_name(dev), md->super.vhca_id);
-    }
     md->super.extra_cap_flags |= UCT_MD_FLAG_SHARED_RKEY;
 
     status = uct_ib_mlx5_devx_check_odp(md, md_config, cap);
@@ -859,6 +887,19 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
 
     md->super.ops = &uct_ib_mlx5_devx_md_ops;
 
+    if (uct_ib_mlx5_is_xgvmi_alias_supported(ctx)) {
+        md->flags |= UCT_IB_MLX5_MD_FLAG_CROSS_GVMI_ALIAS;
+        ucs_info("%s: vhca_id=%d cross gvmi alias mkey is supported",
+                 uct_ib_device_name(dev), md->super.vhca_id);
+    } else if (UCT_IB_MLX5DV_GET(cmd_hca_cap, cap,
+                          crossing_vhca_mkey)) {
+        ucs_info("%s: vhca_id=%d crossing_vhca_mkey is supported",
+                 uct_ib_device_name(dev), md->super.vhca_id);
+    } else {
+        ucs_info("%s: vhca_id=%d crossing_vhca_mkey is not supported",
+                 uct_ib_device_name(dev), md->super.vhca_id);
+    }
+
     uct_ib_mlx5_parse_relaxed_order(md, md_config);
     status = uct_ib_md_open_common(&md->super, ibv_device, md_config);
     if (status != UCS_OK) {
@@ -907,11 +948,15 @@ static void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
 }
 
 #define UCT_IB_CROSS_KEY_IDX 0xcc
+#define UCT_IB_UMEM_ACCESS \
+    (IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE)
+static const char *uct_ib_mkey_token = "SW Hackaton 2022";
+#define UCT_IB_TOKEN_SIZE (0x100 / 8)
 
 static ucs_status_t
-uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
-                                 size_t length, uint32_t allowed_gvmi_id,
-                                 uct_ib_mem_t *ib_memh)
+uct_ib_mlx5_devx_reg_shared_key_old(uct_ib_md_t *ib_md, void *address,
+                                    size_t length, uint32_t allowed_gvmi_id,
+                                    uct_ib_mem_t *ib_memh)
 {
     uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
     uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
@@ -920,15 +965,11 @@ uct_ib_mlx5_devx_reg_crossed_key(uct_ib_md_t *ib_md, void *address,
     void *mkc;
     ucs_status_t status;
 
-    ucs_print("reg key %p crossed", memh);
-
-    memh->type = UCT_IB_MLX5_MEM_CROSSED;
+    memh->type = UCT_IB_MLX5_MEM_SHARED;
 
     ucs_print("umr_reg crosses address=%p length=%zu", address, length);
-    memh->umem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address, length,
-                                     IBV_ACCESS_LOCAL_WRITE |
-                                             IBV_ACCESS_REMOTE_READ |
-                                             IBV_ACCESS_REMOTE_WRITE);
+    memh->umem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address,
+                                      length, UCT_IB_UMEM_ACCESS);
     if (memh->umem == NULL) {
         ucs_error("mlx5dv_devx_umem_reg() failed: %m");
         status = UCS_ERR_NO_MEMORY;
@@ -983,8 +1024,10 @@ err_out:
 }
 
 static ucs_status_t
-uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, uint32_t target_gvmi_id,
-                                  uint32_t target_mkey, uct_ib_mem_t *ib_memh)
+uct_ib_mlx5_devx_import_shared_key_old(uct_ib_md_t *ib_md,
+                                       uint32_t target_gvmi_id,
+                                       uint32_t target_mkey,
+                                       uct_ib_mem_t *ib_memh)
 {
     uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
     uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
@@ -996,7 +1039,7 @@ uct_ib_mlx5_devx_reg_crossing_key(uct_ib_md_t *ib_md, uint32_t target_gvmi_id,
     ucs_status_t status;
 
     ucs_print("reg key %p crossing", memh);
-    memh->type = UCT_IB_MLX5_MEM_CROSSING;
+    memh->type = UCT_IB_MLX5_MEM_IMPORTED;
 
     dv.pd.in = md->super.pd;
     dv.pd.out = &dvpd;
@@ -1047,6 +1090,196 @@ err_out:
     return status;
 }
 
+static ucs_status_t
+uct_ib_mlx5_devx_reg_shared_key_alias(uct_ib_md_t *ib_md, void *address,
+                                      size_t length, uint32_t allowed_gvmi_id,
+                                      uct_ib_mem_t *ib_memh)
+{
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_in)]   = {0};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_out)] = {0};
+    struct mlx5dv_pd dvpd                                = {0};
+    struct mlx5dv_obj dv                                 = {{0}};
+    char ein[UCT_IB_MLX5DV_ST_SZ_BYTES(allow_other_vhca_access_in)]   = {0};
+    char eout[UCT_IB_MLX5DV_ST_SZ_BYTES(allow_other_vhca_access_out)] = {0};
+    ucs_status_t status;
+    void *access_key;
+    void *mkc;
+    int rc;
+
+    memh->type = UCT_IB_MLX5_MEM_SHARED;
+
+    /* register umem */
+    ucs_print("umr_reg crosses address=%p length=%zu", address, length);
+    memh->umem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address,
+                                      length, UCT_IB_UMEM_ACCESS);
+    if (memh->umem == NULL) {
+        ucs_error("mlx5dv_devx_umem_reg() failed: %m");
+        status = UCS_ERR_NO_MEMORY;
+        goto err_out;
+    }
+
+    /* obtain pdn */
+    dv.pd.in = md->super.pd;
+    dv.pd.out = &dvpd;
+    rc = mlx5dv_init_obj(&dv, MLX5DV_OBJ_PD);
+    if (rc) {
+        ucs_error("mlx5dv_init_obj() failed: %m");
+        status = UCS_ERR_IO_ERROR;
+        goto err_free;
+    }
+
+    /* create mkey */
+    mkc = UCT_IB_MLX5DV_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_MKEY);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, translations_octword_actual_size, 1);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, pg_access, 1);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_valid, 1);
+    UCT_IB_MLX5DV_SET(create_mkey_in, in, mkey_umem_id, memh->umem->umem_id);
+    UCT_IB_MLX5DV_SET(mkc, mkc, access_mode_1_0, UCT_IB_MLX5_MKC_ACCESS_MODE_MTT);
+    UCT_IB_MLX5DV_SET(mkc, mkc, a, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, rw, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, rr, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, lw, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, lr, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_mkey, 1);
+    UCT_IB_MLX5DV_SET(mkc, mkc, log_entity_size, 12);
+    UCT_IB_MLX5DV_SET(mkc, mkc, qpn, 0xffffff);
+    UCT_IB_MLX5DV_SET(mkc, mkc, pd, dvpd.pdn);
+    UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, UCT_IB_CROSS_KEY_IDX);
+    UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (uintptr_t)address);
+    UCT_IB_MLX5DV_SET64(mkc, mkc, len, length);
+
+    memh->cross_mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in,
+                                            sizeof(in), out, sizeof(out));
+    if (memh->cross_mr == NULL) {
+        ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+                  UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
+        status = UCS_ERR_IO_ERROR;
+        goto err_free;
+    }
+
+    memh->super.lkey = (UCT_IB_MLX5DV_GET(create_mkey_out, out, mkey_index)
+                        << 8) |
+                       UCT_IB_CROSS_KEY_IDX;
+    memh->super.rkey = memh->super.lkey;
+
+    ucs_print("allowing access by token '%s'", uct_ib_mkey_token);
+
+    UCT_IB_MLX5DV_SET(allow_other_vhca_access_in, ein, opcode,
+                      UCT_IB_MLX5_CMD_OP_ALLOW_OTHER_VHCA_ACCESS);
+    UCT_IB_MLX5DV_SET(allow_other_vhca_access_in, ein,
+                      object_type_to_be_accessed, UCT_IB_MLX5_OBJ_TYPE_MKEY);
+    UCT_IB_MLX5DV_SET(allow_other_vhca_access_in, ein, object_id_to_be_accessed,
+                      memh->super.lkey >> 8);
+    access_key = UCT_IB_MLX5DV_ADDR_OF(allow_other_vhca_access_in, ein, access_key);
+    ucs_strncpy_zero(access_key, uct_ib_mkey_token, UCT_IB_TOKEN_SIZE);
+
+    rc = mlx5dv_devx_general_cmd(md->super.dev.ibv_context, ein, sizeof(ein),
+                                 eout, sizeof(eout));
+    if (rc) {
+        ucs_error("mlx5dv_devx_general_cmd() failed: %m");
+        status = UCS_ERR_IO_ERROR;
+        goto err_destroy;
+    }
+
+    return UCS_OK;
+
+err_destroy:
+    mlx5dv_devx_obj_destroy(memh->cross_mr);
+err_free:
+    mlx5dv_devx_umem_dereg(memh->umem);
+err_out:
+    return status;
+}
+
+static ucs_status_t
+uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
+                                         uint32_t target_gvmi_id,
+                                         uint32_t target_mkey,
+                                         uct_ib_mem_t *ib_memh)
+{
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+    uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(create_alias_obj_in)]   = {0};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_alias_obj_out)] = {0};
+    struct mlx5dv_pd dvpd                                     = {0};
+    struct mlx5dv_obj dv                                      = {{0}};
+    void *hdr       = UCT_IB_MLX5DV_ADDR_OF(create_alias_obj_in, in, hdr);
+    void *alias_ctx = UCT_IB_MLX5DV_ADDR_OF(create_alias_obj_in, in, alias_ctx);
+    void *access_key;
+    int rc;
+
+    /* obtain pdn */
+    dv.pd.in = md->super.pd;
+    dv.pd.out = &dvpd;
+    rc = mlx5dv_init_obj(&dv, MLX5DV_OBJ_PD);
+    if (rc) {
+        ucs_error("mlx5dv_init_obj() failed: %m");
+        return UCS_ERR_IO_ERROR;
+    }
+
+    /* create alias */
+    UCT_IB_MLX5DV_SET(general_obj_in_cmd_hdr, hdr, opcode,
+                      UCT_IB_MLX5_CMD_OP_CREATE_GENERAL_OBJECT);
+    UCT_IB_MLX5DV_SET(general_obj_in_cmd_hdr, hdr, obj_type, UCT_IB_MLX5_OBJ_TYPE_MKEY);
+    UCT_IB_MLX5DV_SET(general_obj_in_cmd_hdr, hdr, alias_object, 1);
+    UCT_IB_MLX5DV_SET(alias_context, alias_ctx, vhca_id_to_be_accessed,
+                      target_gvmi_id);
+    UCT_IB_MLX5DV_SET(alias_context, alias_ctx, object_id_to_be_accessed,
+                      target_mkey >> 8);
+    UCT_IB_MLX5DV_SET(alias_context, alias_ctx, metadata_1, dvpd.pdn);
+    access_key = UCT_IB_MLX5DV_ADDR_OF(alias_context, alias_ctx, access_key);
+    ucs_strncpy_zero(access_key, uct_ib_mkey_token, UCT_IB_TOKEN_SIZE);
+
+    memh->cross_mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in,
+                                            sizeof(in), out, sizeof(out));
+    if (memh->cross_mr == NULL) {
+        ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+                  UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.syndrome));
+        return UCS_ERR_IO_ERROR;
+    }
+
+    memh->super.lkey = (UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.obj_id)
+                        << 8) |
+                       UCT_IB_CROSS_KEY_IDX;
+    memh->super.rkey = memh->super.lkey;
+    return UCS_OK;
+}
+
+static ucs_status_t
+uct_ib_mlx5_devx_reg_shared_key(uct_ib_md_t *ib_md, void *address,
+                                size_t length, uint32_t allowed_gvmi_id,
+                                uct_ib_mem_t *ib_memh)
+{
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+
+    return (md->flags & UCT_IB_MLX5_MD_FLAG_CROSS_GVMI_ALIAS) ?
+                   uct_ib_mlx5_devx_reg_shared_key_alias(ib_md, address, length,
+                                                         allowed_gvmi_id,
+                                                         ib_memh) :
+                   uct_ib_mlx5_devx_reg_shared_key_old(ib_md, address, length,
+                                                       allowed_gvmi_id,
+                                                       ib_memh);
+}
+
+static ucs_status_t
+uct_ib_mlx5_devx_import_shared_key(uct_ib_md_t *ib_md, uint32_t target_gvmi_id,
+                                   uint32_t target_mkey, uct_ib_mem_t *ib_memh)
+{
+    uct_ib_mlx5_md_t *md = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
+
+    return (md->flags & UCT_IB_MLX5_MD_FLAG_CROSS_GVMI_ALIAS) ?
+                   uct_ib_mlx5_devx_import_shared_key_alias(ib_md,
+                                                            target_gvmi_id,
+                                                            target_mkey,
+                                                            ib_memh) :
+                   uct_ib_mlx5_devx_import_shared_key_old(ib_md, target_gvmi_id,
+                                                          target_mkey, ib_memh);
+}
+
 static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .open                = uct_ib_mlx5_devx_md_open,
     .cleanup             = uct_ib_mlx5_devx_md_cleanup,
@@ -1058,8 +1291,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_devx_md_ops = {
     .dereg_multithreaded = uct_ib_mlx5_devx_dereg_multithreaded,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
     .get_atomic_mr_id    = uct_ib_mlx5_md_get_atomic_mr_id,
-    .reg_crossed_key     = uct_ib_mlx5_devx_reg_crossed_key,
-    .reg_crossing_key    = uct_ib_mlx5_devx_reg_crossing_key,
+    .reg_shared_key      = uct_ib_mlx5_devx_reg_shared_key,
+    .import_shared_key   = uct_ib_mlx5_devx_import_shared_key,
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_devx_md_ops, 2);
@@ -1270,8 +1503,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_md_ops = {
     .dereg_multithreaded = (uct_ib_md_dereg_multithreaded_func_t)ucs_empty_function_return_unsupported,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
     .get_atomic_mr_id    = (uct_ib_md_get_atomic_mr_id_func_t)ucs_empty_function_return_unsupported,
-    .reg_crossed_key     = uct_ib_mlx5_devx_reg_crossed_key,
-    .reg_crossing_key    = uct_ib_mlx5_devx_reg_crossing_key,
+    .reg_shared_key     = uct_ib_mlx5_devx_reg_shared_key,
+    .import_shared_key    = uct_ib_mlx5_devx_import_shared_key,
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_md_ops, 1);
