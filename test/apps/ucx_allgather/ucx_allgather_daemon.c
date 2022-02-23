@@ -150,7 +150,7 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 
 	end_time = get_time();
 
-	DOCA_LOG_INFO("total xgvmi import time (%zd clients): %.0f usec",
+	DOCA_LOG_DBG("total xgvmi import time (%zd clients): %.0f usec",
 	              xgvmi_buffer->num_keys, (end_time - start_time) * 1e6);
 
 	/** Attach the received allgather request to the allgather super request for futher processing */
