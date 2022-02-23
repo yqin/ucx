@@ -282,8 +282,8 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 	allgather_super_request->recv_vector_iter = 0;
 	DOCA_LOG_DBG("initialized request %zu", header->id);
 
-#if 0
-	if (ucx_app_config.allgather_mode != UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
+	if (ucx_app_config.allgather_mode != UCX_ALLGATHER_OFFLOADED_XGVMI_MODE &&
+		ucx_app_config.role == UCX_ALLGATHER_CLIENT) {
 		if (result_vector == NULL) {
 			/*
 			 * result_vector is NULL in case processing Active Message receive operation from peers on daemon or
@@ -302,9 +302,7 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 			allgather_super_request->result_vector_owner = 0;
 			allgather_super_request->result_vector = result_vector;
 		}
-	} else
-#endif
-	{
+	} else {
 		allgather_super_request->result_vector = NULL;
 		allgather_super_request->result_vector_owner = 0;
 	}
@@ -316,7 +314,7 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 		DOCA_LOG_ERR("failed to allocate memory for receive vectors");
 		goto err_result_vector_free;
 	}
-
+	DOCA_LOG_DBG("allocated recv vector request %zu", header->id);
 	STAILQ_INIT(&allgather_super_request->am_desc_list);
 
 	if ((ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) &&
