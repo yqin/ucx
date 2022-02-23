@@ -280,23 +280,29 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 	}
 	allgather_super_request->result_vector_size = length;
 	allgather_super_request->recv_vector_iter = 0;
-	if (result_vector == NULL) {
-		/*
-		 * result_vector is NULL in case processing Active Message receive operation from peers on daemon or
-		 * non-offloaded client side
-		 */
-		allgather_super_request->result_vector_owner = 1;
-		allgather_super_request->result_vector = malloc(allgather_super_request->result_vector_size *
-								allgather_datatype_size[ucx_app_config.datatype]);
-		if (allgather_super_request->result_vector == NULL) {
-			DOCA_LOG_ERR("failed to allocate memory to hold the allgather result");
-			goto err_allgather_super_request_free;
+	
+	if (ucx_app_config.allgather_mode != UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
+		if (result_vector == NULL) {
+			/*
+			 * result_vector is NULL in case processing Active Message receive operation from peers on daemon or
+			 * non-offloaded client side
+			 */
+			allgather_super_request->result_vector_owner = 1;
+			allgather_super_request->result_vector = malloc(allgather_super_request->result_vector_size *
+									allgather_datatype_size[ucx_app_config.datatype]);
+			if (allgather_super_request->result_vector == NULL) {
+				DOCA_LOG_ERR("failed to allocate memory to hold the allgather result");
+				goto err_allgather_super_request_free;
+			}
+			allgather_datatype_memset(allgather_super_request->result_vector,
+							allgather_super_request->result_vector_size);
+		} else {
+			allgather_super_request->result_vector_owner = 0;
+			allgather_super_request->result_vector = result_vector;
 		}
-		allgather_datatype_memset(allgather_super_request->result_vector,
-						allgather_super_request->result_vector_size);
 	} else {
+		allgather_super_request->result_vector = NULL;
 		allgather_super_request->result_vector_owner = 0;
-		allgather_super_request->result_vector = result_vector;
 	}
 
 	/** Allocate receive vectors for each connection to be used when doing allgather between daemons or clients */
