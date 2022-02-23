@@ -280,7 +280,9 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 	}
 	allgather_super_request->result_vector_size = length;
 	allgather_super_request->recv_vector_iter = 0;
-	
+	DOCA_LOG_DBG("initialized request %zu", header->id);
+
+#if 0
 	if (ucx_app_config.allgather_mode != UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
 		if (result_vector == NULL) {
 			/*
@@ -300,7 +302,9 @@ allgather_super_request_allocate(const struct ucx_allgather_header *header, size
 			allgather_super_request->result_vector_owner = 0;
 			allgather_super_request->result_vector = result_vector;
 		}
-	} else {
+	} else
+#endif
+	{
 		allgather_super_request->result_vector = NULL;
 		allgather_super_request->result_vector_owner = 0;
 	}
