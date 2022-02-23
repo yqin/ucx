@@ -154,6 +154,15 @@ extern struct ucx_allgather_config ucx_app_config;
 struct ucx_context *context;
 struct ucx_connection **connections;
 extern GHashTable *allgather_super_requests_hash;
+extern void **allgather_vectors; /*< Array of allgather vectors */
+extern struct ucx_memh **allgather_memhs; /*< Array of allgather memory handles */
+extern void **allgather_rkey_buffers; /*< Array of allgather rkey buffers */
+extern size_t allgather_rkey_buffer_length;
+
+void allgather_vectors_cleanup(size_t num_allgather_vectors);
+void allgather_vectors_reset(void);
+int allgather_vectors_init(void);
+void *preallocated_vector_get(struct ucx_memh **mem_handle, void **rkey_buffer);
 
 void process_cleanup(int num_connections);
 

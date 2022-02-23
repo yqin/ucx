@@ -33,132 +33,14 @@ struct ucx_allgather_metrics {
 	double overlap; /*< Percentage of overlap between computation and network operations */
 };
 
-static void **allgather_vectors; /*< Array of allgather vectors */
-static struct ucx_memh **allgather_memhs; /*< Array of allgather memory handles */
-static void **allgather_rkey_buffers; /*< Array of allgather rkey buffers */
-static size_t allgather_rkey_buffer_length = 0;
+//static void **allgather_vectors; /*< Array of allgather vectors */
+//static struct ucx_memh **allgather_memhs; /*< Array of allgather memory handles */
+//static void **allgather_rkey_buffers; /*< Array of allgather rkey buffers */
+//static size_t allgather_rkey_buffer_length = 0;
 static size_t allgather_next_id; /*< Next allgather ID which could be allocated by clients */
 
 DOCA_LOG_REGISTER(UCX_allgather::Cleint);
 
-
-static void allgather_vectors_cleanup(size_t num_allgather_vectors)
-{
-	size_t vector_iter;
-
-	/** Go through all vectors and free the memory allocated to hold them */
-	for (vector_iter = 0; vector_iter < num_allgather_vectors; ++vector_iter) {
-		ucx_mem_unmap(context, allgather_memhs[vector_iter]);
-		//free(allgather_vectors[vector_iter]);
-	}
-
-	free(allgather_vectors);
-}
-
-static void allgather_vectors_reset(void)
-{
-	size_t vector_iter, i;
-
-	/** Go through all vectors, fill them by initial data */
-	for (vector_iter = 0; vector_iter < ucx_app_config.batch_size; ++vector_iter) {
-		for (i = 0; i < ucx_app_config.vector_size; ++i) {
-			/** Initialize vectors by initial values */
-			switch (ucx_app_config.datatype) {
-			case UCX_ALLGATHER_BYTE:
-				((uint8_t *)allgather_vectors[vector_iter])[i] = i % UINT8_MAX;
-				break;
-			case UCX_ALLGATHER_INT:
-				((int *)allgather_vectors[vector_iter])[i] = i % INT_MAX;
-				break;
-			case UCX_ALLGATHER_FLOAT:
-				((float *)allgather_vectors[vector_iter])[i] = (float)i;
-				break;
-			case UCX_ALLGATHER_DOUBLE:
-				((double *)allgather_vectors[vector_iter])[i] = (double)i;
-				break;
-			}
-		}
-	}
-}
-
-static size_t num_allgather_vectors = 0;
-
-static int allgather_vectors_init(void)
-{
-	size_t vector_size = ucx_app_config.vector_size * allgather_datatype_size[ucx_app_config.datatype];
-	size_t vector_iter;
-	size_t rkey_buffer_length;
-	size_t num_buffers =
-			(ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) ?
-			(ucx_app_config.num_batches * ucx_app_config.num_clients) :
-			ucx_app_config.num_batches;
-
-	allgather_vectors = malloc(ucx_app_config.batch_size * sizeof(*allgather_vectors));
-	if (allgather_vectors == NULL) {
-		DOCA_LOG_ERR("failed to allocate memory to hold array of allgather vectors");
-		goto err;
-	}
-
-	allgather_memhs = malloc(ucx_app_config.batch_size * sizeof(*allgather_memhs));
-	if (allgather_memhs == NULL) {
-		DOCA_LOG_ERR("failed to allocate memory to hold array of allgather memhs");
-		goto err;
-	}
-
-	allgather_rkey_buffers = malloc(ucx_app_config.batch_size * sizeof(*allgather_rkey_buffers));
-	if (allgather_rkey_buffers == NULL) {
-		DOCA_LOG_ERR("failed to allocate memory to hold array of allgather rkey buffers");
-		goto err;
-	}
-
-	/** Go through all vectors, allocate them */
-	for (vector_iter = 0; vector_iter < ucx_app_config.batch_size; ++vector_iter) {
-		allgather_memhs[vector_iter] = ucx_mem_map(
-				context, NULL, vector_size, NULL, 3,
-				ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE);
-		if (allgather_memhs[vector_iter] == NULL)
-			goto err_allgather_vectors_cleanup;
-
-		allgather_vectors[vector_iter] = allgather_memhs[vector_iter]->address;
-		assert(allgather_vectors[vector_iter] != NULL);
-
-		if (ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) {
-			allgather_rkey_buffers[vector_iter] = ucx_rkey_pack(context, allgather_memhs[vector_iter], &rkey_buffer_length);
-			assert(allgather_rkey_buffers[vector_iter] != NULL);
-			assert(rkey_buffer_length != 0);
-			if (allgather_rkey_buffer_length == 0) {
-				allgather_rkey_buffer_length = rkey_buffer_length;
-			} else {
-				assert(allgather_rkey_buffer_length == rkey_buffer_length);
-			}
-		}
-
-		++num_allgather_vectors;
-	}
-
-	return 0;
-
-err_allgather_vectors_cleanup:
-	allgather_vectors_cleanup(num_allgather_vectors);
-err:
-	return -1;
-}
-
-/** Allocate vector for send operation and move iterator to the next one which will be allocated next time */
-static void *preallocated_vector_get(struct ucx_memh **mem_handle, void **rkey_buffer)
-{
-	static size_t allgather_vector_iter;
-	void *vector = allgather_vectors[allgather_vector_iter];
-
-	if (mem_handle != NULL)
-		*mem_handle = allgather_memhs[allgather_vector_iter];
-
-	if (rkey_buffer != NULL)
-		*rkey_buffer = allgather_rkey_buffers[allgather_vector_iter];
-
-	allgather_vector_iter = (allgather_vector_iter + 1) % num_allgather_vectors;
-	return vector;
-}
 
 /** Client callback to complete AM send operation for receiving the allgather result from the daemon */
 static void client_am_recv_data_complete_callback(void *arg, ucs_status_t status)
