@@ -81,11 +81,17 @@ static void allgather_vectors_reset(void)
 	}
 }
 
+static size_t num_allgather_vectors = 0;
+
 static int allgather_vectors_init(void)
 {
 	size_t vector_size = ucx_app_config.vector_size * allgather_datatype_size[ucx_app_config.datatype];
-	size_t vector_iter, num_allgather_vectors = 0;
+	size_t vector_iter;
 	size_t rkey_buffer_length;
+	size_t num_buffers = 
+			(ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) ?
+			(ucx_app_config.num_batches * ucx_app_config.num_clients) :
+			ucx_app_config.num_batches;
 
 	allgather_vectors = malloc(ucx_app_config.batch_size * sizeof(*allgather_vectors));
 	if (allgather_vectors == NULL) {
@@ -139,7 +145,7 @@ err:
 }
 
 /** Allocate vector for send operation and move iterator to the next one which will be allocated next time */
-static inline void *preallocated_vector_get(struct ucx_memh **mem_handle, void **rkey_buffer)
+static void *preallocated_vector_get(struct ucx_memh **mem_handle, void **rkey_buffer)
 {
 	static size_t allgather_vector_iter;
 	void *vector = allgather_vectors[allgather_vector_iter];
@@ -150,7 +156,7 @@ static inline void *preallocated_vector_get(struct ucx_memh **mem_handle, void *
 	if (rkey_buffer != NULL)
 		*rkey_buffer = allgather_rkey_buffers[allgather_vector_iter];
 
-	allgather_vector_iter = (allgather_vector_iter + 1) % ucx_app_config.batch_size;
+	allgather_vector_iter = (allgather_vector_iter + 1) % num_allgather_vectors;
 	return vector;
 }
 
@@ -408,6 +414,86 @@ static void allgather_offloaded_complete_ctrl_xgvmi_send_callback(void *arg, ucs
 	assert(status == UCS_OK);
 
 	free(allgather_super_request->xgvmi_rkeys_buffer);
+}
+
+void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allgather_super_request)
+{
+	size_t i;
+	void *xgvmi_keys_buffer;
+	uint8_t *p;
+	size_t *rkey_buffer_lengths;
+	size_t xgvmi_keys_buffer_length = sizeof(struct ucx_allgather_xgvmi_buffer);
+
+	rkey_buffer_lengths = alloca(sizeof(*rkey_buffer_lengths) * ucx_app_config.num_clients);
+
+	allgather_super_request->recv_memhs = malloc(
+			ucx_app_config.num_clients * sizeof(*allgather_super_request->recv_memhs));
+	if (allgather_super_request->recv_memhs == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory for recv_memhs");
+		return NULL;
+	}
+
+	allgather_super_request->recv_rkey_buffers = malloc(
+			ucx_app_config.num_clients * sizeof(*allgather_super_request->recv_rkey_buffers));
+	if (allgather_super_request->recv_rkey_buffers == NULL) {
+		DOCA_LOG_ERR("failed to allocate memory for recv_rkey_buffers");
+		return NULL;
+	}
+
+	for (i = 0; i < ucx_app_config.num_clients; ++i) {
+		/*if (allgather_super_request->header.sender_client_id == i) {
+
+			continue;
+		}*/
+
+		allgather_super_request->recv_vectors[i] = preallocated_vector_get(
+				&allgather_super_request->recv_memhs[i], &allgather_super_request->recv_rkey_buffers[i]);
+
+		/*allgather_super_request->recv_memhs[i] = ucx_mem_map(context, NULL,
+															allgather_super_request->result_vector_size *
+															allgather_datatype_size[ucx_app_config.datatype],
+															NULL, 3, 1);
+		if (allgather_super_request->recv_memhs[i] == NULL) {
+			DOCA_LOG_ERR("failed to do mem_map");
+			return NULL;
+		}
+
+		allgather_super_request->recv_vectors[i] = allgather_super_request->recv_memhs[i]->address;
+		allgather_super_request->recv_rkey_buffers[i] = ucx_rkey_pack(context, allgather_super_request->recv_memhs[i],
+																	  &rkey_buffer_lengths[i]);*/
+		rkey_buffer_lengths[i] = allgather_rkey_buffer_length;
+		xgvmi_keys_buffer_length += rkey_buffer_lengths[i] + sizeof(struct ucx_allgather_xgvmi_key);
+	}
+
+	xgvmi_keys_buffer = malloc(xgvmi_keys_buffer_length);
+	if (xgvmi_keys_buffer == NULL) {
+		DOCA_LOG_ERR("failed to alloc mem for xgvmi_keys_buffer");
+		return NULL;
+	}
+
+	p = (uint8_t*)xgvmi_keys_buffer;
+
+	((struct ucx_allgather_xgvmi_buffer*)xgvmi_keys_buffer)->num_keys = ucx_app_config.num_clients;
+	p += sizeof(struct ucx_allgather_xgvmi_buffer);
+
+	for (i = 0; i < ucx_app_config.num_clients; ++i) {
+		((struct ucx_allgather_xgvmi_key*)p)->length = rkey_buffer_lengths[i];
+		((struct ucx_allgather_xgvmi_key*)p)->address = (uint64_t)(uintptr_t)allgather_super_request->recv_vectors[i];
+		p += sizeof(struct ucx_allgather_xgvmi_key);
+
+		DOCA_LOG_DBG("%zu: length - %zu, addr - %p", i, rkey_buffer_lengths[i],
+						allgather_super_request->recv_vectors[i]);
+
+		memcpy(p, allgather_super_request->recv_rkey_buffers[i], rkey_buffer_lengths[i]);
+		p += rkey_buffer_lengths[i];
+	}
+
+	assert(p == ((uint8_t*)xgvmi_keys_buffer + xgvmi_keys_buffer_length));
+
+	allgather_super_request->xgvmi_rkeys_buffer = xgvmi_keys_buffer;
+	allgather_super_request->xgvmi_rkeys_buffer_length = xgvmi_keys_buffer_length;
+
+	return xgvmi_keys_buffer;
 }
 
 static size_t allgather_xgvmi_offloaded_batch_submit(size_t vector_size, size_t batch_size)

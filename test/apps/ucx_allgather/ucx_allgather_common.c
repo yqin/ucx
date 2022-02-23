@@ -129,8 +129,8 @@ void allgather_super_request_destroy(struct ucx_allgather_super_request *allgath
 			/*if (allgather_super_request->header.sender_client_id == i) {
 				continue;
 			}*/
-			ucx_rkey_buffer_release(allgather_super_request->recv_rkey_buffers[i]);
-			ucx_mem_unmap(context, allgather_super_request->recv_memhs[i]);
+			//ucx_rkey_buffer_release(allgather_super_request->recv_rkey_buffers[i]);
+			//ucx_mem_unmap(context, allgather_super_request->recv_memhs[i]);
 			allgather_super_request->recv_vectors[i] = NULL;
 		}
 
@@ -167,82 +167,6 @@ static inline void allgather_datatype_memset(void *vector, size_t length)
 			((double *)vector)[i] = (double)ucx_app_config.client_id;
 		break;
 	}
-}
-
-static void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allgather_super_request)
-{
-	size_t i;
-	void *xgvmi_keys_buffer;
-	uint8_t *p;
-	size_t *rkey_buffer_lengths;
-	size_t xgvmi_keys_buffer_length = sizeof(struct ucx_allgather_xgvmi_buffer);
-
-	rkey_buffer_lengths = alloca(sizeof(*rkey_buffer_lengths) * ucx_app_config.num_clients);
-
-	allgather_super_request->recv_memhs = malloc(
-			ucx_app_config.num_clients * sizeof(*allgather_super_request->recv_memhs));
-	if (allgather_super_request->recv_memhs == NULL) {
-		DOCA_LOG_ERR("failed to allocate memory for recv_memhs");
-		return NULL;
-	}
-
-	allgather_super_request->recv_rkey_buffers = malloc(
-			ucx_app_config.num_clients * sizeof(*allgather_super_request->recv_rkey_buffers));
-	if (allgather_super_request->recv_rkey_buffers == NULL) {
-		DOCA_LOG_ERR("failed to allocate memory for recv_rkey_buffers");
-		return NULL;
-	}
-
-	for (i = 0; i < ucx_app_config.num_clients; ++i) {
-		/*if (allgather_super_request->header.sender_client_id == i) {
-
-			continue;
-		}*/
-
-		allgather_super_request->recv_memhs[i] = ucx_mem_map(context, NULL,
-															allgather_super_request->result_vector_size *
-															allgather_datatype_size[ucx_app_config.datatype],
-															NULL, 3, 1);
-		if (allgather_super_request->recv_memhs[i] == NULL) {
-			DOCA_LOG_ERR("failed to do mem_map");
-			return NULL;
-		}
-
-		allgather_super_request->recv_vectors[i] = allgather_super_request->recv_memhs[i]->address;
-		allgather_super_request->recv_rkey_buffers[i] = ucx_rkey_pack(context, allgather_super_request->recv_memhs[i],
-																	  &rkey_buffer_lengths[i]);
-		xgvmi_keys_buffer_length += rkey_buffer_lengths[i] + sizeof(struct ucx_allgather_xgvmi_key);
-	}
-
-	xgvmi_keys_buffer = malloc(xgvmi_keys_buffer_length);
-	if (xgvmi_keys_buffer == NULL) {
-		DOCA_LOG_ERR("failed to alloc mem for xgvmi_keys_buffer");
-		return NULL;
-	}
-
-	p = (uint8_t*)xgvmi_keys_buffer;
-
-	((struct ucx_allgather_xgvmi_buffer*)xgvmi_keys_buffer)->num_keys = ucx_app_config.num_clients;
-	p += sizeof(struct ucx_allgather_xgvmi_buffer);
-
-	for (i = 0; i < ucx_app_config.num_clients; ++i) {
-		((struct ucx_allgather_xgvmi_key*)p)->length = rkey_buffer_lengths[i];
-		((struct ucx_allgather_xgvmi_key*)p)->address = (uint64_t)(uintptr_t)allgather_super_request->recv_vectors[i];
-		p += sizeof(struct ucx_allgather_xgvmi_key);
-
-		DOCA_LOG_DBG("%zu: length - %zu, addr - %p", i, rkey_buffer_lengths[i],
-						allgather_super_request->recv_vectors[i]);
-
-		memcpy(p, allgather_super_request->recv_rkey_buffers[i], rkey_buffer_lengths[i]);
-		p += rkey_buffer_lengths[i];
-	}
-
-	assert(p == ((uint8_t*)xgvmi_keys_buffer + xgvmi_keys_buffer_length));
-
-	allgather_super_request->xgvmi_rkeys_buffer = xgvmi_keys_buffer;
-	allgather_super_request->xgvmi_rkeys_buffer_length = xgvmi_keys_buffer_length;
-
-	return xgvmi_keys_buffer;
 }
 
 struct ucx_allgather_super_request *

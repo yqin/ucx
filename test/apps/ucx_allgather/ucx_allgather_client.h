@@ -16,6 +16,8 @@
 
 #include "ucx_allgather_common.h"
 
+void* allgather_xgvmi_keys_pack(struct ucx_allgather_super_request *allgather_super_request);
+
 int client_am_recv_ctrl_callback(struct ucx_am_desc *am_desc);
 
 void client_run(void);
