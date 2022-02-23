@@ -88,7 +88,7 @@ static int allgather_vectors_init(void)
 	size_t vector_size = ucx_app_config.vector_size * allgather_datatype_size[ucx_app_config.datatype];
 	size_t vector_iter;
 	size_t rkey_buffer_length;
-	size_t num_buffers = 
+	size_t num_buffers =
 			(ucx_app_config.allgather_mode == UCX_ALLGATHER_OFFLOADED_XGVMI_MODE) ?
 			(ucx_app_config.num_batches * ucx_app_config.num_clients) :
 			ucx_app_config.num_batches;
@@ -392,13 +392,13 @@ allgather_metrics_print(struct ucx_allgather_metrics *allgather_metrics)
 	DOCA_LOG_INFO("\nallgather (%s/%s) and matrix multiplication metrics to complete %zu batches (batch size - %zu, vector size - %zu):",
 			allgather_metrics->mode_str, allgather_metrics->datatype_str,
 			allgather_metrics->current_batch_iter, allgather_metrics->batch_size, allgather_metrics->vector_size);
-	DOCA_LOG_INFO("min - %.3f seconds", allgather_metrics->min);
-	DOCA_LOG_INFO("max - %.3f seconds", allgather_metrics->max);
-	DOCA_LOG_INFO("avg - %.3f seconds", allgather_metrics->avg);
-	DOCA_LOG_INFO("total - %.3f seconds", allgather_metrics->total);
-	DOCA_LOG_INFO("submit avg - %.3f seconds", allgather_metrics->submit_time / allgather_metrics->current_batch_iter);
-	DOCA_LOG_INFO("computation time - %.3f seconds", allgather_metrics->compute_time);
-	DOCA_LOG_INFO("pure network time - %.3f seconds", allgather_metrics->network_time);
+	DOCA_LOG_INFO("min - %.06f seconds", allgather_metrics->min);
+	DOCA_LOG_INFO("max - %.06f seconds", allgather_metrics->max);
+	DOCA_LOG_INFO("avg - %.06f seconds", allgather_metrics->avg);
+	DOCA_LOG_INFO("total - %.06f seconds", allgather_metrics->total);
+	DOCA_LOG_INFO("submit avg - %.06f seconds", allgather_metrics->submit_time / allgather_metrics->current_batch_iter);
+	DOCA_LOG_INFO("computation time - %.06f seconds", allgather_metrics->compute_time);
+	DOCA_LOG_INFO("pure network time - %.06f seconds", allgather_metrics->network_time);
 	DOCA_LOG_INFO("computation and communication overlap - %.2f%%", allgather_metrics->overlap);
 }
 
