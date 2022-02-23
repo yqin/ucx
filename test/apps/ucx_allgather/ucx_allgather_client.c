@@ -199,6 +199,7 @@ int client_am_recv_ctrl_xgvmi_done_callback(struct ucx_am_desc *am_desc)
 	ucx_am_desc_query(am_desc, &connection, (const void **)&allgather_header, &header_length, &length);
 
 	assert(sizeof(*allgather_header) == header_length);
+	assert(allgather_header->sender_client_id == ucx_app_config.client_id);
 	assert(length == 0);
 
 	allgather_super_request = g_hash_table_lookup(allgather_super_requests_hash, &allgather_header->id);
@@ -569,7 +570,6 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 
 		/** Calculate time of run time for performing batch of allgather operations and computation */
 		start_time = get_time();
-		DOCA_LOG_INFO("start_time: %.3f seconds", start_time);
 		batch_submit_func(ucx_app_config.vector_size, batch_size);
 
 		compute_start_time = get_time();

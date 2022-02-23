@@ -42,12 +42,16 @@ extern int doca_print_enable;
 
 #define DOCA_LOG_DBG(_fmt, ...) \
 	if (doca_print_enable) { \
-		fprintf(stderr, "DEBUG " _fmt"\n", ## __VA_ARGS__); \
+		struct timeval tv_p; \
+		gettimeofday(&tv_p, NULL); \
+		fprintf(stderr, "DEBUG %lu.%06lu " _fmt"\n", tv_p.tv_sec, tv_p.tv_usec, ## __VA_ARGS__); \
 	}
 
 #define DOCA_LOG_INFO(_fmt, ...) \
 	if (1) { \
-		fprintf(stderr, "INFO  " _fmt"\n", ## __VA_ARGS__); \
+		struct timeval tv_p; \
+		gettimeofday(&tv_p, NULL); \
+		fprintf(stderr, "INFO  %lu.%06lu " _fmt"\n", tv_p.tv_sec, tv_p.tv_usec, ## __VA_ARGS__); \
 	}
 
 #define APP_EXIT(_fmt, ...) \
