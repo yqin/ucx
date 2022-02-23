@@ -517,6 +517,13 @@ allgather_metrics_init(struct ucx_allgather_metrics *allgather_metrics, allgathe
 	double start_time, end_time;
 	int repeat;
 
+	/* Warmup */
+	for (repeat = 0; repeat < discover_time_repeats; ++repeat) {
+		batch_submit_func(ucx_app_config.vector_size, ucx_app_config.batch_size);
+		allgather_batch_wait();
+	}
+
+	/* Pure/Compute calculations */
 	allgather_metrics_reset(allgather_metrics);
 
 	allgather_metrics->network_time = 0;
