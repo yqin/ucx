@@ -513,12 +513,12 @@ static void allgather_barrier(allgather_batch_submit_func batch_submit_func)
 static void
 allgather_metrics_init(struct ucx_allgather_metrics *allgather_metrics, allgather_batch_submit_func batch_submit_func)
 {
-	static const int discover_time_repeats = 3;
+	int discover_time_repeats = ucx_app_config.num_batches;
 	double start_time, end_time;
 	int repeat;
 
 	/* Warmup */
-	for (repeat = 0; repeat < discover_time_repeats; ++repeat) {
+	for (repeat = 0; repeat < 3; ++repeat) {
 		batch_submit_func(ucx_app_config.vector_size, ucx_app_config.batch_size);
 		allgather_batch_wait();
 	}
