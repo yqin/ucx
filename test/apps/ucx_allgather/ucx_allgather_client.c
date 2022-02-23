@@ -371,11 +371,11 @@ static void cpu_exploit(struct ucx_allgather_metrics *allgather_metrics)
 	}
 }
 
-static void allgather_metrics_iteration_print(double run_time, double compute_time,
+static void allgather_metrics_iteration_print(double run_time, double compute_time, double submut_time,
 						struct ucx_allgather_metrics *allgather_metrics)
 {
-	DOCA_LOG_INFO("%zu: current run time - %.3f seconds, compute - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds",
-		allgather_metrics->current_batch_iter, run_time, compute_time, allgather_metrics->min, allgather_metrics->max,
+	DOCA_LOG_INFO("%zu: current run time - %.3f seconds, compute - %.3f seconds, subnut - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds",
+		allgather_metrics->current_batch_iter, run_time, compute_time, submut_time, allgather_metrics->min, allgather_metrics->max,
 		allgather_metrics->avg);
 }
 
@@ -583,7 +583,7 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 
 		/** Calculate allgather metrics and print metrics of the current iteration */
 		allgather_metrics_calculate(run_time, compute_time, submit_time, &allgather_metrics);
-		allgather_metrics_iteration_print(run_time, compute_time, &allgather_metrics);
+		allgather_metrics_iteration_print(run_time, compute_time, submit_time, &allgather_metrics);
 
 		allgather_barrier(batch_submit_func);
 	}
