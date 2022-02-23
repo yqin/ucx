@@ -381,7 +381,7 @@ static void cpu_exploit(struct ucx_allgather_metrics *allgather_metrics)
 static void allgather_metrics_iteration_print(double run_time, double compute_time, double submut_time,
 						struct ucx_allgather_metrics *allgather_metrics)
 {
-	DOCA_LOG_INFO("%zu: current run time - %.3f seconds, compute - %.3f seconds, subnut - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds",
+	DOCA_LOG_INFO("%zu: current run time - %.06f seconds, compute - %.06f seconds, submit - %.06f seconds, min - %.06f seconds, max - %.06f seconds, avg - %.06f seconds",
 		allgather_metrics->current_batch_iter, run_time, compute_time, submut_time, allgather_metrics->min, allgather_metrics->max,
 		allgather_metrics->avg);
 }
@@ -600,12 +600,12 @@ static void allgather_barrier(allgather_batch_submit_func batch_submit_func)
 static void
 allgather_metrics_init(struct ucx_allgather_metrics *allgather_metrics, allgather_batch_submit_func batch_submit_func)
 {
-	int discover_time_repeats = ucx_app_config.num_batches;
+	int discover_time_repeats = 3;
 	double start_time, end_time;
 	int repeat;
 
 	/* Warmup */
-	for (repeat = 0; repeat < 3; ++repeat) {
+	for (repeat = 0; repeat < 1; ++repeat) {
 		batch_submit_func(ucx_app_config.vector_size, ucx_app_config.batch_size);
 		allgather_batch_wait();
 	}
