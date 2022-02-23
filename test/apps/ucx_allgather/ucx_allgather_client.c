@@ -569,6 +569,7 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 
 		/** Calculate time of run time for performing batch of allgather operations and computation */
 		start_time = get_time();
+		DOCA_LOG_INFO("start_time: %.3f seconds", start_time);
 		batch_submit_func(ucx_app_config.vector_size, batch_size);
 
 		compute_start_time = get_time();
