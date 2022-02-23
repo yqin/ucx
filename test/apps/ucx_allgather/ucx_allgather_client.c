@@ -573,7 +573,7 @@ static void allgather(allgather_batch_submit_func batch_submit_func)
 		batch_submit_func(ucx_app_config.vector_size, batch_size);
 
 		compute_start_time = get_time();
-		cpu_exploit(&allgather_metrics);
+		//cpu_exploit(&allgather_metrics);
 		compute_end_time = get_time();
 		compute_time = compute_end_time - compute_start_time;
 		allgather_batch_wait();
