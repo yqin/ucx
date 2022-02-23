@@ -374,7 +374,7 @@ static void cpu_exploit(struct ucx_allgather_metrics *allgather_metrics)
 static void allgather_metrics_iteration_print(double run_time, double compute_time,
 						struct ucx_allgather_metrics *allgather_metrics)
 {
-	DOCA_LOG_DBG("%zu: current run time - %.3f seconds, compute - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds\n",
+	DOCA_LOG_INFO("%zu: current run time - %.3f seconds, compute - %.3f seconds, min - %.3f seconds, max - %.3f seconds, avg - %.3f seconds",
 		allgather_metrics->current_batch_iter, run_time, compute_time, allgather_metrics->min, allgather_metrics->max,
 		allgather_metrics->avg);
 }
@@ -382,17 +382,17 @@ static void allgather_metrics_iteration_print(double run_time, double compute_ti
 static void
 allgather_metrics_print(struct ucx_allgather_metrics *allgather_metrics)
 {
-	DOCA_LOG_INFO("allgather (%s/%s) and matrix multiplication metrics to complete %zu batches (batch size - %zu, vector size - %zu):\n",
+	DOCA_LOG_INFO("\nallgather (%s/%s) and matrix multiplication metrics to complete %zu batches (batch size - %zu, vector size - %zu):",
 			allgather_metrics->mode_str, allgather_metrics->datatype_str,
 			allgather_metrics->current_batch_iter, allgather_metrics->batch_size, allgather_metrics->vector_size);
-	DOCA_LOG_INFO("min - %.3f seconds\n", allgather_metrics->min);
-	DOCA_LOG_INFO("max - %.3f seconds\n", allgather_metrics->max);
-	DOCA_LOG_INFO("avg - %.3f seconds\n", allgather_metrics->avg);
-	DOCA_LOG_INFO("total - %.3f seconds\n", allgather_metrics->total);
-	DOCA_LOG_INFO("submit avg - %.3f seconds\n", allgather_metrics->submit_time / allgather_metrics->current_batch_iter);
-	DOCA_LOG_INFO("computation time - %.3f seconds\n", allgather_metrics->compute_time);
-	DOCA_LOG_INFO("pure network time - %.3f seconds\n", allgather_metrics->network_time);
-	DOCA_LOG_INFO("computation and communication overlap - %.2f%%\n", allgather_metrics->overlap);
+	DOCA_LOG_INFO("min - %.3f seconds", allgather_metrics->min);
+	DOCA_LOG_INFO("max - %.3f seconds", allgather_metrics->max);
+	DOCA_LOG_INFO("avg - %.3f seconds", allgather_metrics->avg);
+	DOCA_LOG_INFO("total - %.3f seconds", allgather_metrics->total);
+	DOCA_LOG_INFO("submit avg - %.3f seconds", allgather_metrics->submit_time / allgather_metrics->current_batch_iter);
+	DOCA_LOG_INFO("computation time - %.3f seconds", allgather_metrics->compute_time);
+	DOCA_LOG_INFO("pure network time - %.3f seconds", allgather_metrics->network_time);
+	DOCA_LOG_INFO("computation and communication overlap - %.2f%%", allgather_metrics->overlap);
 }
 
 static void allgather_offloaded_complete_ctrl_send_callback(void *arg, ucs_status_t status)

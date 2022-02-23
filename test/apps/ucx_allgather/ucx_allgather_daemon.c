@@ -88,7 +88,14 @@ int daemon_am_recv_ctrl_callback(struct ucx_am_desc *am_desc)
 err:
 	return -1;
 }
+static inline double get_time(void)
+{
+	struct timeval tv;
 
+	gettimeofday(&tv, NULL);
+
+	return tv.tv_sec + (tv.tv_usec * 1e-6);
+}
 static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t status)
 {
 	struct ucx_allgather_request *allgather_request = arg;
@@ -99,6 +106,7 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 	uint8_t *p;
 	struct ucx_am_desc *am_desc, *tmp_am_desc;
 	struct ucx_allgather_header *allgather_header;
+	double start_time, end_time;
 
 	assert(status == UCS_OK);
 
@@ -114,6 +122,8 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 	}
 
 	/** Parse XGVMI keys */
+	start_time = get_time();
+
 	xgvmi_buffer = allgather_request->vector;
 	p = (uint8_t*)xgvmi_buffer;
 	assert(xgvmi_buffer->num_keys == ucx_app_config.num_clients);
@@ -137,6 +147,11 @@ static void daemon_am_recv_xgvmi_data_complete_callback(void *arg, ucs_status_t 
 							allgather_datatype_size[ucx_app_config.datatype], xgvmi_key->rkey_buffer, UINT32_MAX, 0);
 		p += sizeof(*xgvmi_key) + xgvmi_key->length;
 	}
+
+	end_time = get_time();
+
+	DOCA_LOG_INFO("total xgvmi import time (%zd clients): %.0f usec",
+	              xgvmi_buffer->num_keys, (end_time - start_time) * 1e6);
 
 	/** Attach the received allgather request to the allgather super request for futher processing */
 	allgather_request->allgather_super_request = allgather_super_request;
