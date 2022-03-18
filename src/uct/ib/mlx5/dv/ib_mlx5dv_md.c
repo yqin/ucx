@@ -66,7 +66,7 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
     uct_ib_mlx5_mem_t *memh = ucs_derived_of(ib_memh, uct_ib_mlx5_mem_t);
     int ret;
 
-    // ucs_print("de-reg key %p type %d", memh, mr_type);
+    ucs_print("de-reg key %p type %d", memh, mr_type);
     switch (memh->type) {
     case UCT_IB_MLX5_MEM_REG:
         return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
@@ -85,7 +85,8 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
             ucs_warn("mlx5dv_devx_umem_dereg(crossmr) failed: %m");
             return UCS_ERR_IO_ERROR;
         }
-        return UCS_OK;
+
+        return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
     case UCT_IB_MLX5_MEM_IMPORTED:
         if (mr_type != UCT_IB_MR_DEFAULT) {
             return UCS_OK;
@@ -95,7 +96,7 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
             ucs_warn("mlx5dv_devx_obj_destroy(crossmr) failed: %m");
             return UCS_ERR_IO_ERROR;
         }
-        return UCS_OK;
+        return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
     default:
         return UCS_ERR_INVALID_PARAM;
     }
@@ -950,7 +951,7 @@ static void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
 #define UCT_IB_CROSS_KEY_IDX 0xcc
 #define UCT_IB_UMEM_ACCESS \
     (IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE)
-static const char *uct_ib_mkey_token = "SW Hackaton 2022";
+static const char *uct_ib_mkey_token = "ALLTOALLV_EXT DPU OFFLOAD";
 #define UCT_IB_TOKEN_SIZE (0x100 / 8)
 
 static ucs_status_t
@@ -964,8 +965,6 @@ uct_ib_mlx5_devx_reg_shared_key_old(uct_ib_md_t *ib_md, void *address,
     char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_mkey_out)] = {0};
     void *mkc;
     ucs_status_t status;
-
-    memh->type = UCT_IB_MLX5_MEM_SHARED;
 
     ucs_print("umr_reg crosses address=%p length=%zu, allowed gvmi_id - %u", address, length, allowed_gvmi_id);
     memh->umem = mlx5dv_devx_umem_reg(md->super.dev.ibv_context, address,
@@ -1011,6 +1010,7 @@ uct_ib_mlx5_devx_reg_shared_key_old(uct_ib_md_t *ib_md, void *address,
                         << 8) |
                        UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
+    memh->type       = UCT_IB_MLX5_MEM_SHARED;
 
     ucs_print("crossed mkey is %x", memh->super.lkey);
 
@@ -1040,7 +1040,6 @@ uct_ib_mlx5_devx_import_shared_key_old(uct_ib_md_t *ib_md,
 
     target_gvmi_id = 0; /* HACK */
     ucs_print("reg key %p crossing, target mkey - 0x%x target gvmi - %u", memh, target_mkey, target_gvmi_id);
-    memh->type = UCT_IB_MLX5_MEM_IMPORTED;
 
     dv.pd.in = md->super.pd;
     dv.pd.out = &dvpd;
@@ -1082,6 +1081,7 @@ uct_ib_mlx5_devx_import_shared_key_old(uct_ib_md_t *ib_md,
                         << 8) |
                        UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
+    memh->type       = UCT_IB_MLX5_MEM_IMPORTED;
 
     ucs_print("imported shared mkey %x", memh->super.lkey);
 
@@ -1110,8 +1110,6 @@ uct_ib_mlx5_devx_reg_shared_key_alias(uct_ib_md_t *ib_md, void *address,
     void *access_key;
     void *mkc;
     int rc;
-
-    memh->type = UCT_IB_MLX5_MEM_SHARED;
 
     /* register umem */
     ucs_print("uct_ib_mlx5_devx_reg_shared_key_alias(%s) address=%p length=%zu",
@@ -1174,6 +1172,7 @@ uct_ib_mlx5_devx_reg_shared_key_alias(uct_ib_md_t *ib_md, void *address,
                         << 8) |
                        UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
+    memh->type       = UCT_IB_MLX5_MEM_SHARED;
 
     UCT_IB_MLX5DV_SET(allow_other_vhca_access_in, ein, opcode,
                       UCT_IB_MLX5_CMD_OP_ALLOW_OTHER_VHCA_ACCESS);
@@ -1259,6 +1258,7 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
                         << 8) |
                        UCT_IB_CROSS_KEY_IDX;
     memh->super.rkey = memh->super.lkey;
+    memh->type       = UCT_IB_MLX5_MEM_IMPORTED;
 
     ucs_print("imported shared mkey %x", memh->super.lkey);
 
@@ -1519,8 +1519,8 @@ static uct_ib_md_ops_t uct_ib_mlx5_md_ops = {
     .dereg_multithreaded = (uct_ib_md_dereg_multithreaded_func_t)ucs_empty_function_return_unsupported,
     .mem_prefetch        = uct_ib_mlx5_mem_prefetch,
     .get_atomic_mr_id    = (uct_ib_md_get_atomic_mr_id_func_t)ucs_empty_function_return_unsupported,
-    .reg_shared_key     = uct_ib_mlx5_devx_reg_shared_key,
-    .import_shared_key    = uct_ib_mlx5_devx_import_shared_key,
+    .reg_shared_key      = uct_ib_mlx5_devx_reg_shared_key,
+    .import_shared_key   = uct_ib_mlx5_devx_import_shared_key,
 };
 
 UCT_IB_MD_OPS(uct_ib_mlx5_md_ops, 1);
