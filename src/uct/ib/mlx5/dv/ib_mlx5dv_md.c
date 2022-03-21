@@ -86,7 +86,7 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
             return UCS_ERR_IO_ERROR;
         }
 
-        return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
+        return UCS_OK;
     case UCT_IB_MLX5_MEM_IMPORTED:
         if (mr_type != UCT_IB_MR_DEFAULT) {
             return UCS_OK;
@@ -96,7 +96,7 @@ static ucs_status_t uct_ib_mlx5_dereg_key(uct_ib_md_t *md,
             ucs_warn("mlx5dv_devx_obj_destroy(crossmr) failed: %m");
             return UCS_ERR_IO_ERROR;
         }
-        return uct_ib_dereg_mr(memh->mrs[mr_type].super.ib);
+        return UCS_OK;
     default:
         return UCS_ERR_INVALID_PARAM;
     }
