@@ -1260,7 +1260,8 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
     memh->super.rkey = memh->super.lkey;
     memh->type       = UCT_IB_MLX5_MEM_IMPORTED;
 
-    ucs_print("imported shared mkey %x", memh->super.lkey);
+    ucs_print("imported shared mkey 0x%x for gvmi %d", memh->super.lkey,
+              target_gvmi_id);
 
     return UCS_OK;
 }
