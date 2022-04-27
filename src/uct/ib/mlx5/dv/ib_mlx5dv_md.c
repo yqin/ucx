@@ -993,7 +993,7 @@ uct_ib_mlx5_devx_reg_shared_key_old(uct_ib_md_t *ib_md, void *address,
     UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, UCT_IB_CROSS_KEY_IDX);
     UCT_IB_MLX5DV_SET(mkc, mkc, alter_pd_to_vhca_id, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, crossed_side_mkey, 1);
-    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_gvmi_id, allowed_gvmi_id);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_vhca_id, allowed_gvmi_id);
     UCT_IB_MLX5DV_SET64(mkc, mkc, start_addr, (intptr_t)address);
     UCT_IB_MLX5DV_SET64(mkc, mkc, len, length);
 
@@ -1061,7 +1061,7 @@ uct_ib_mlx5_devx_import_shared_key_old(uct_ib_md_t *ib_md,
     UCT_IB_MLX5DV_SET(mkc, mkc, lw, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, lr, 1);
     UCT_IB_MLX5DV_SET(mkc, mkc, pd, dvpd.pdn);
-    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_gvmi_id, target_gvmi_id);
+    UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_vhca_id, target_gvmi_id);
     UCT_IB_MLX5DV_SET(mkc, mkc, crossing_target_mkey, target_mkey);
     UCT_IB_MLX5DV_SET(mkc, mkc, qpn, 0xffffff);
     UCT_IB_MLX5DV_SET(mkc, mkc, mkey_7_0, UCT_IB_CROSS_KEY_IDX);
@@ -1204,6 +1204,8 @@ err_out:
     return status;
 }
 
+//#define DEBUG_MMO
+
 static ucs_status_t
 uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
                                          uint32_t target_gvmi_id,
@@ -1220,6 +1222,34 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
     void *alias_ctx = UCT_IB_MLX5DV_ADDR_OF(create_alias_obj_in, in, alias_ctx);
     void *access_key;
     int rc;
+
+#ifdef DEBUG_MMO
+    void *s_start = NULL;
+    size_t s_length = 256;
+    size_t buf_size = 256;
+    void *buf;
+    struct ibv_context *context = md->super.dev.ibv_context;
+    struct ibv_pd *pd = md->super.pd;
+    struct ibv_mr *mr;
+    struct ibv_cq_init_attr_ex cq_init_attr_ex = {0};
+    struct ibv_cq_ex *cq_ex;
+    struct ibv_qp_init_attr_ex qp_init_attr_ex = {0};
+    struct mlx5dv_qp_init_attr qp_init_attr_dv = {0};
+    struct ibv_qp *qp;
+    struct ibv_qp_ex *qp_ex;
+    struct mlx5dv_qp_ex *mqp_ex;
+    char qp_r2i_in[UCT_IB_MLX5DV_ST_SZ_BYTES(rst2init_qp_in)] = {0};
+    char qp_r2i_out[UCT_IB_MLX5DV_ST_SZ_BYTES(rst2init_qp_out)] = {0};
+    char qp_i2i_in[UCT_IB_MLX5DV_ST_SZ_BYTES(init2init_qp_in)] = {0};
+    char qp_i2i_out[UCT_IB_MLX5DV_ST_SZ_BYTES(init2init_qp_out)] = {0};
+    char qp_i2r_in[UCT_IB_MLX5DV_ST_SZ_BYTES(init2rtr_qp_in)] = {0};
+    char qp_i2r_out[UCT_IB_MLX5DV_ST_SZ_BYTES(init2rtr_qp_out)] = {0};
+    char qp_r2r_in[UCT_IB_MLX5DV_ST_SZ_BYTES(rtr2rts_qp_in)] = {0};
+    char qp_r2r_out[UCT_IB_MLX5DV_ST_SZ_BYTES(rtr2rts_qp_out)] = {0};
+    void *qpc;
+    void *qpce;
+    struct ibv_wc wc;
+#endif
 
     /* obtain pdn */
     dv.pd.in = md->super.pd;
@@ -1267,6 +1297,173 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
 
     ucs_print("imported shared mkey 0x%x for gvmi %d", memh->super.lkey,
               target_gvmi_id);
+
+#ifdef DEBUG_MMO
+    /* register local buffer */
+    buf = (uint8_t *)malloc(buf_size);
+    if (!buf) {
+        ucs_error("not enough memory");
+    }
+    mr = ibv_reg_mr(pd, buf, buf_size,
+                    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                    IBV_ACCESS_REMOTE_WRITE);
+    if (!mr) {
+        ucs_error("failed to register mr");
+    }
+
+    /* create CQ */
+    memset(&cq_init_attr_ex, 0, sizeof(cq_init_attr_ex));
+    cq_init_attr_ex.cqe = 16;
+    cq_init_attr_ex.cq_context = NULL;
+    cq_init_attr_ex.channel = NULL;
+    cq_init_attr_ex.comp_vector = 0;
+    cq_ex = ibv_create_cq_ex(context, &cq_init_attr_ex);
+    if (!cq_ex) {
+        ucs_error("failed to create CQ (%d): %m", errno);
+    }
+
+    /* create QP */
+    memset(&qp_init_attr_ex, 0, sizeof(qp_init_attr_ex));
+    qp_init_attr_ex.sq_sig_all = 1;
+    qp_init_attr_ex.send_cq = ibv_cq_ex_to_cq(cq_ex);
+    qp_init_attr_ex.recv_cq = ibv_cq_ex_to_cq(cq_ex);
+    qp_init_attr_ex.cap.max_send_wr = 1;
+    qp_init_attr_ex.cap.max_recv_wr = 1;
+    qp_init_attr_ex.cap.max_send_sge = 1;
+    qp_init_attr_ex.cap.max_recv_sge = 1;
+    qp_init_attr_ex.qp_type = IBV_QPT_RC;
+    qp_init_attr_ex.send_ops_flags = IBV_QP_EX_WITH_RDMA_WRITE |
+                                     IBV_QP_EX_WITH_SEND |
+                                     IBV_QP_EX_WITH_RDMA_READ;
+    qp_init_attr_ex.pd = pd;
+    qp_init_attr_ex.comp_mask = IBV_QP_INIT_ATTR_PD |
+                                IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+    memset(&qp_init_attr_dv, 0, sizeof(qp_init_attr_dv));
+    qp_init_attr_dv.comp_mask = MLX5DV_QP_INIT_ATTR_MASK_SEND_OPS_FLAGS;
+    qp_init_attr_dv.send_ops_flags = MLX5DV_QP_EX_WITH_MEMCPY;
+    qp = mlx5dv_create_qp(context, &qp_init_attr_ex, &qp_init_attr_dv);
+    if (!qp) {
+        ucs_error("failed to create QP (%d): %m", errno);
+    }
+    qp_ex = ibv_qp_to_qp_ex(qp);
+    if (!qp_ex) {
+        ucs_error("failed to create QP_EX (%d): %m", errno);
+    }
+    mqp_ex = mlx5dv_qp_ex_from_ibv_qp_ex(qp_ex);
+    if (!mqp_ex) {
+        ucs_error("failed to create DV QP (%d): %m", errno);
+    }
+
+    /* modify QP to init state */
+    qpc = UCT_IB_MLX5DV_ADDR_OF(rst2init_qp_in, qp_r2i_in, qpc);
+    UCT_IB_MLX5DV_SET(rst2init_qp_in, qp_r2i_in, opcode,
+                      UCT_IB_MLX5_CMD_OP_RST2INIT_QP);
+    UCT_IB_MLX5DV_SET(rst2init_qp_in, qp_r2i_in, qpn, qp->qp_num);
+    UCT_IB_MLX5DV_SET(qpc, qpc, pm_state, UCT_IB_MLX5_QPC_PM_STATE_MIGRATED);
+    UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.pkey_index, 0);
+    UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.vhca_port_num, 1);
+    UCT_IB_MLX5DV_SET(qpc, qpc, rre, 1);
+    UCT_IB_MLX5DV_SET(qpc, qpc, rwe, 1);
+    rc = mlx5dv_devx_qp_modify(qp, qp_r2i_in, sizeof(qp_r2i_in), qp_r2i_out,
+                               sizeof(qp_r2i_out));
+    if (rc) {
+        ucs_error("failed to modify QP state to INIT (%d): %m", errno);
+    }
+
+    /* enable MMO for QP */
+    qpce = UCT_IB_MLX5DV_ADDR_OF(init2init_qp_in, qp_i2i_in, qpc_data_ext);
+    UCT_IB_MLX5DV_SET(init2init_qp_in, qp_i2i_in, opcode,
+                      UCT_IB_MLX5_CMD_OP_INIT2INIT_QP);
+    UCT_IB_MLX5DV_SET(init2init_qp_in, qp_i2i_in, qpn, qp->qp_num);
+    UCT_IB_MLX5DV_SET(init2init_qp_in, qp_i2i_in, qpc_ext, 1);
+    UCT_IB_MLX5DV_SET64(init2init_qp_in, qp_i2i_in, opt_param_mask_95_32,
+                        UCT_IB_MLX5_QPC_OPT_MASK_32_INIT2INIT_MMO);
+    UCT_IB_MLX5DV_SET(qpc_ext, qpce, mmo, 1);
+    rc = mlx5dv_devx_qp_modify(qp, qp_i2i_in, sizeof(qp_i2i_in), qp_i2i_out,
+                               sizeof(qp_i2i_out));
+    if (rc) {
+        ucs_error("failed to enable MMO (%d)", rc);
+    }
+
+    /* modify QP to RTR state */
+    qpc = UCT_IB_MLX5DV_ADDR_OF(init2rtr_qp_in, qp_i2r_in, qpc);
+    UCT_IB_MLX5DV_SET(init2rtr_qp_in, qp_i2r_in, opcode,
+                      UCT_IB_MLX5_CMD_OP_INIT2RTR_QP);
+    UCT_IB_MLX5DV_SET(init2rtr_qp_in, qp_i2r_in, qpn, qp->qp_num);
+    UCT_IB_MLX5DV_SET(qpc, qpc, log_msg_max, 30);
+    UCT_IB_MLX5DV_SET(qpc, qpc, mtu, IBV_MTU_1024);
+    UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.rlid, 0);
+    UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.grh, 0);
+    rc = mlx5dv_devx_qp_modify(qp, qp_i2r_in, sizeof(qp_i2r_in), qp_i2r_out,
+                               sizeof(qp_i2r_out));
+    if (rc) {
+        ucs_error("failed to modify QP state to RTR (%d): %m", errno);
+    }
+
+    /* modify QP to RTS state */
+    qpc = UCT_IB_MLX5DV_ADDR_OF(rtr2rts_qp_in, qp_r2r_in, qpc);
+    UCT_IB_MLX5DV_SET(rtr2rts_qp_in, qp_r2r_in, opcode,
+                      UCT_IB_MLX5_CMD_OP_RTR2RTS_QP);
+    UCT_IB_MLX5DV_SET(rtr2rts_qp_in, qp_r2r_in, qpn, qp->qp_num);
+    UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.ack_timeout, 12);
+    UCT_IB_MLX5DV_SET(qpc, qpc, retry_count, 3);
+    UCT_IB_MLX5DV_SET(qpc, qpc, rnr_retry, 3);
+    UCT_IB_MLX5DV_SET(qpc, qpc, next_send_psn, 0);
+    UCT_IB_MLX5DV_SET(qpc, qpc, log_sra_max, 31u - __builtin_clz(1));
+    rc = mlx5dv_devx_qp_modify(qp, qp_r2r_in, sizeof(qp_r2r_in), qp_r2r_out,
+                               sizeof(qp_r2r_out));
+    if (rc) {
+        ucs_error("failed to modify QP state to RTS (%d): %m", errno);
+    }
+
+    /* execute DMA copy from HOST to DPU */
+    ibv_wr_start(qp_ex);
+    qp_ex->wr_id = 0x11;
+    qp_ex->wr_flags = IBV_SEND_SIGNALED;
+    ucs_print("local address %p, lkey 0x%x, remote address %p, rkey 0x%x\n",
+              buf, mr->lkey, s_start, memh->super.rkey);
+    mlx5dv_wr_memcpy(mqp_ex, mr->lkey, (uint64_t)buf, memh->super.rkey,
+                     (uint64_t)s_start, s_length);
+    rc = ibv_wr_complete(qp_ex);
+    if (rc) {
+        ucs_error("failed to post WR (%d)", rc);
+    }
+
+    /* poll from CQ */
+start_poll:
+    rc = ibv_poll_cq(ibv_cq_ex_to_cq(cq_ex), 1, &wc);
+    if (rc == 0) {
+        goto start_poll;
+    }
+    if (rc < 0 || wc.status != IBV_WC_SUCCESS) {
+        ucs_error("failed to poll CQ (rc = %d, wc.status = %d)", rc, wc.status);
+    }
+    ucs_print("succeeded to poll CQ (rc = %d, wr_id = 0x%lx, opcode = 0x%x)",
+              rc, wc.wr_id, wc.opcode);
+    if (wc.wr_id != qp_ex->wr_id) {
+        goto start_poll;
+    }
+
+    free(buf);
+
+    /* cleanup */
+    rc = ibv_destroy_qp(qp);
+    if (rc) {
+        ucs_error("failed to destroy QP (%d)", rc);
+    }
+
+    rc = ibv_destroy_cq(cq_ex);
+    if (rc) {
+        ucs_error("failed to destroy CQ (%d)", rc);
+    }
+
+    rc = ibv_dereg_mr(mr):
+    if (rc) {
+        ucs_error("failed to dereg local MR (%d)", rc);
+    }
+
+    free(buf);
+#endif
 
     return UCS_OK;
 }

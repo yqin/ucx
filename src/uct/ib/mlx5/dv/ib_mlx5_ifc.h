@@ -71,6 +71,7 @@ enum {
     UCT_IB_MLX5_CMD_OP_2ERR_QP                 = 0x507,
     UCT_IB_MLX5_CMD_OP_2RST_QP                 = 0x50a,
     UCT_IB_MLX5_CMD_OP_QUERY_QP                = 0x50b,
+    UCT_IB_MLX5_CMD_OP_INIT2INIT_QP            = 0x50e,
     UCT_IB_MLX5_CMD_OP_CREATE_RMP              = 0x90c,
     UCT_IB_MLX5_CMD_OP_CREATE_DCT              = 0x710,
     UCT_IB_MLX5_CMD_OP_DRAIN_DCT               = 0x712,
@@ -727,7 +728,7 @@ struct uct_ib_mlx5_mkc_bits {
 
     uint8_t    reserved_at_120[0x60];
 
-    uint8_t    crossing_target_gvmi_id[0x10];
+    uint8_t    crossing_target_vhca_id[0x10];
     uint8_t    reserved_at_190[0x10];
 
     union {
@@ -1436,6 +1437,19 @@ struct uct_ib_mlx5_qpc_bits {
     uint8_t         dbr_umem_id[0x20];
 };
 
+struct uct_ib_mlx5_qpc_ext_bits {
+    uint8_t         reserved_at_0[0x2];
+    uint8_t         mmo[0x1];
+    uint8_t         reserved_at_3[0xd];
+    uint8_t         dci_stream_channel_id[0x10];
+
+    uint8_t         qos_queue_group_id_requester[0x20];
+
+    uint8_t         qos_queue_group_id_responder[0x20];
+
+    uint8_t         reserved_at_60[0x5a0];
+};
+
 struct uct_ib_mlx5_create_qp_out_bits {
     uint8_t         status[0x8];
     uint8_t         reserved_at_8[0x18];
@@ -1471,6 +1485,48 @@ struct uct_ib_mlx5_create_qp_in_bits {
     uint8_t         reserved_at_861[0x1f];
 
     uint8_t         pas[0][0x40];
+};
+
+enum uct_ib_mlx5_qpc_opt_mask_32 {
+	UCT_IB_MLX5_QPC_OPT_MASK_32_DCI_STREAM_CHANNEL_ID = 1 << 0,
+	UCT_IB_MLX5_QPC_OPT_MASK_32_QOS_QUEUE_GROUP_ID    = 1 << 1,
+	UCT_IB_MLX5_QPC_OPT_MASK_32_UDP_SPORT             = 1 << 2,
+	UCT_IB_MLX5_QPC_OPT_MASK_32_INIT2INIT_MMO         = 1 << 3,
+};
+
+struct uct_ib_mlx5_init2init_qp_out_bits {
+    uint8_t         status[0x8];
+    uint8_t         reserved_at_8[0x18];
+
+    uint8_t         syndrome[0x20];
+
+    uint8_t         reserved_at_40[0x40];
+};
+
+struct uct_ib_mlx5_init2init_qp_in_bits {
+    uint8_t         opcode[0x10];
+    uint8_t         uid[0x10];
+
+    uint8_t         reserved_at_20[0x10];
+    uint8_t         op_mod[0x10];
+
+    uint8_t         qpc_ext[0x1];
+    uint8_t         reserved_at_41[0x7];
+    uint8_t         qpn[0x18];
+
+    uint8_t         reserved_at_60[0x20];
+
+    uint8_t         opt_param_mask[0x20];
+
+    uint8_t         reserved_at_a0[0x20];
+
+    struct uct_ib_mlx5_qpc_bits qpc;
+
+    uint8_t         reserved_at_800[0x40];
+
+    uint8_t         opt_param_mask_95_32[0x40];
+
+    struct uct_ib_mlx5_qpc_ext_bits qpc_data_ext;
 };
 
 struct uct_ib_mlx5_init2rtr_qp_out_bits {
