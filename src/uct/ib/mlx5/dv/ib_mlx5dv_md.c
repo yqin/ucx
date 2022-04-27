@@ -1122,7 +1122,7 @@ uct_ib_mlx5_devx_reg_shared_key_alias(uct_ib_md_t *ib_md, void *address,
     umem_in.comp_mask   = 0;
     memh->umem = mlx5dv_devx_umem_reg_ex(md->super.dev.ibv_context, &umem_in);
     if (memh->umem == NULL) {
-        ucs_error("mlx5dv_devx_umem_reg() failed: %m");
+        ucs_error("mlx5dv_devx_umem_reg_ex() failed: %m");
         status = UCS_ERR_NO_MEMORY;
         goto err_out;
     }
@@ -1162,7 +1162,7 @@ uct_ib_mlx5_devx_reg_shared_key_alias(uct_ib_md_t *ib_md, void *address,
     memh->cross_mr = mlx5dv_devx_obj_create(md->super.dev.ibv_context, in,
                                             sizeof(in), out, sizeof(out));
     if (memh->cross_mr == NULL) {
-        ucs_error("mlx5dv_devx_obj_create() failed, syndrome %x: %m",
+        ucs_error("mlx5dv_devx_obj_create() failed, syndrome 0x%x: %m",
                   UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
         status = UCS_ERR_IO_ERROR;
         goto err_free;
@@ -1248,15 +1248,20 @@ uct_ib_mlx5_devx_import_shared_key_alias(uct_ib_md_t *ib_md,
                                             sizeof(in), out, sizeof(out));
     if (memh->cross_mr == NULL) {
         ucs_error("mlx5dv_devx_obj_create(shared_key_alias, tg_mkey=0x%x "
-                  "tg_gvmi=%d) failed, syndrome %x: %m",
+                  "tg_gvmi=%d) failed, syndrome 0x%x: %m",
                   target_mkey, target_gvmi_id,
+                  UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.syndrome));
+        return UCS_ERR_IO_ERROR;
+    }
+    rc = UCT_IB_MLX5DV_GET(create_alias_obj_out, out, alias_ctx.status);
+    if (rc) {
+        ucs_error("created MR alias object in bad state, syndrome 0x%x",
                   UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.syndrome));
         return UCS_ERR_IO_ERROR;
     }
 
     memh->super.lkey = (UCT_IB_MLX5DV_GET(create_alias_obj_out, out, hdr.obj_id)
-                        << 8) |
-                       UCT_IB_CROSS_KEY_IDX;
+                        << 8);
     memh->super.rkey = memh->super.lkey;
     memh->type       = UCT_IB_MLX5_MEM_IMPORTED;
 
