@@ -17,6 +17,7 @@ extern "C" {
 #include <ucs/arch/bitops.h>
 #include <ucs/arch/atomic.h>
 #include <ucs/sys/math.h>
+#include <uct/ib/base/ib_md.h>
 }
 #include <net/if_arp.h>
 #include <ifaddrs.h>
@@ -811,6 +812,56 @@ UCS_TEST_SKIP_COND_P(test_md, dereg_bad_arg,
 
     EXPECT_UCS_OK(status);
     free(ptr);
+}
+
+UCS_TEST_SKIP_COND_P(test_md, shared_rkey,
+                     !check_caps(UCT_MD_FLAG_SHARED_MKEY))
+{
+    static const size_t size = 1 * UCS_MBYTE;
+    ucs_status_t status;
+    uct_mem_h memh;
+    void *ptr;
+
+    int ret = ucs_posix_memalign(&ptr, ucs_get_page_size(), size,
+                                 "shared_buf");
+    ASSERT_EQ(0, ret);
+
+    // Register exported part of shared MKEY
+    uct_md_mem_reg_params_t params;
+    params.field_mask = UCT_MD_MEM_REG_FIELD_FLAGS;
+    params.flags      = UCT_MD_MEM_FLAG_SHARED | UCT_MD_MEM_ACCESS_ALL;
+    status            = uct_md_mem_reg_v2(md(), ptr, size, &params, &memh);
+    ASSERT_UCS_OK(status);
+
+    std::vector<uint8_t> shared_mkey_buf;
+    shared_mkey_buf.resize(md_attr().shared_mkey_packed_size);
+
+    status = uct_md_mkey_pack(md(), memh, &shared_mkey_buf[0]);
+    ASSERT_UCS_OK(status);
+
+    // Register imported part of shared MKEY
+    uct_md_mem_attach_params_t attach_params;
+    attach_params.field_mask         =
+            UCT_MD_MEM_ATTACH_FIELD_FLAGS |
+            UCT_MD_MEM_ATTACH_FIELD_SHARED_MKEY_BUFFER |
+            UCT_MD_MEM_ATTACH_FIELD_MEMH;
+    attach_params.flags              = UCT_MD_MEM_ATTACH_FLAG_SHARED;
+    attach_params.shared_mkey_buffer = shared_mkey_buf.data();
+    status                           = uct_md_mem_attach(md(), &attach_params);
+    ASSERT_UCS_OK(status);
+
+    // Deregister exported part of shared MKEY
+    status = uct_md_mem_dereg(md(), memh);
+    ASSERT_UCS_OK(status);
+
+    // Deregister imported part of shared MKEY
+    uct_md_mem_dereg_params_t dereg_params;
+    dereg_params.field_mask = UCT_MD_MEM_DEREG_FIELD_MEMH |
+                              UCT_MD_MEM_DEREG_FIELD_ADDRESS;
+    dereg_params.memh       = attach_params.memh;
+    dereg_params.address    = attach_params.address;
+    status = uct_md_mem_dereg(md(), &dereg_params);
+    ASSERT_UCS_OK(status);
 }
 
 UCT_MD_INSTANTIATE_TEST_CASE(test_md)

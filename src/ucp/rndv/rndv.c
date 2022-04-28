@@ -202,7 +202,8 @@ static size_t ucp_rndv_rtr_pack(void *dest, void *arg)
         packed_rkey_size = ucp_rkey_pack_uct(
                 ep->worker->context, rreq->recv.state.dt.contig.md_map,
                 rreq->recv.state.dt.contig.memh, &mem_info, 0,
-                ucp_ep_config(ep)->uct_rkey_pack_flags, NULL, rndv_rtr_hdr + 1);
+                ucp_ep_config(ep)->uct_rkey_pack_flags, NULL,
+                rndv_rtr_hdr + 1);
         if (packed_rkey_size < 0) {
             return packed_rkey_size;
         }

@@ -279,7 +279,7 @@ enum ucp_ep_params_flags_field {
                                                            send to a particular
                                                            remote endpoint, for
                                                            example stream */
-    UCP_EP_PARAMS_FLAGS_SEND_CLIENT_ID = UCS_BIT(2)   /**< Send client id
+    UCP_EP_PARAMS_FLAGS_SEND_CLIENT_ID = UCS_BIT(2),  /**< Send client id
                                                            when connecting to remote
                                                            socket address as part of the
                                                            connection request payload.
@@ -287,6 +287,14 @@ enum ucp_ep_params_flags_field {
                                                            can be obtained from
                                                            @ref ucp_conn_request_h using
                                                            @ref ucp_conn_request_query */
+    UCP_EP_PARAMS_FLAGS_SHARED_MKEY    = UCS_BIT(3)   /**< Request selection of transports
+                                                           with @ref UCT_MD_FLAG_SHARED_MKEY
+                                                           capability to be able perform
+                                                           local operation using a peer's
+                                                           memory buffer and memory handle
+                                                           associated with it and created
+                                                           with @ref UCP_MEM_MAP_SHARED
+                                                           capability */
 };
 
 
@@ -383,16 +391,17 @@ typedef enum ucp_ep_perf_attr_field {
  * present. It is used to enable backward compatibility support.
  */
 enum ucp_mem_map_params_field {
-    UCP_MEM_MAP_PARAM_FIELD_ADDRESS     = UCS_BIT(0), /**< Address of the memory that
-                                                           will be used in the
-                                                           @ref ucp_mem_map routine. */
-    UCP_MEM_MAP_PARAM_FIELD_LENGTH      = UCS_BIT(1), /**< The size of memory that
-                                                           will be allocated or
-                                                           registered in the
-                                                           @ref ucp_mem_map routine.*/
-    UCP_MEM_MAP_PARAM_FIELD_FLAGS       = UCS_BIT(2), /**< Allocation flags. */
-    UCP_MEM_MAP_PARAM_FIELD_PROT        = UCS_BIT(3), /**< Memory protection mode. */
-    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE = UCS_BIT(4)  /**< Memory type. */
+    UCP_MEM_MAP_PARAM_FIELD_ADDRESS            = UCS_BIT(0), /**< Address of the memory that
+                                                                  will be used in the
+                                                                  @ref ucp_mem_map routine. */
+    UCP_MEM_MAP_PARAM_FIELD_LENGTH             = UCS_BIT(1), /**< The size of memory that
+                                                                  will be allocated or
+                                                                 registered in the
+                                                                 @ref ucp_mem_map routine.*/
+    UCP_MEM_MAP_PARAM_FIELD_FLAGS              = UCS_BIT(2), /**< Allocation flags. */
+    UCP_MEM_MAP_PARAM_FIELD_PROT               = UCS_BIT(3), /**< Memory protection mode. */
+    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE        = UCS_BIT(4), /**< Memory type. */
+    UCP_MEM_MAP_PARAM_FIELD_SHARED_MKEY_BUFFER = UCS_BIT(5)  /**< Shared memory key buffer. */
 };
 
 /**
@@ -541,10 +550,13 @@ enum {
                                             if passed address is not a null-pointer
                                             then it will be used as a hint or direct
                                             address for allocation. */
-    UCP_MEM_MAP_FIXED    = UCS_BIT(2)  /**< Don't interpret address as a hint:
+    UCP_MEM_MAP_FIXED    = UCS_BIT(2), /**< Don't interpret address as a hint:
                                             place the mapping at exactly that
                                             address. The address must be a multiple
                                             of the page size. */
+    UCP_MEM_MAP_SHARED   = UCS_BIT(3)  /**< Create a shared memory handle which
+                                            could be shared with peers to
+                                            perform their local operations */
 };
 
 
@@ -1600,6 +1612,9 @@ typedef struct ucp_mem_map_params {
       *    internally.
       */
      ucs_memory_type_t      memory_type;
+
+    /* Shared memory key buffer */
+    void                   *shared_mkey_buffer;
 } ucp_mem_map_params_t;
 
 
@@ -2862,6 +2877,118 @@ typedef struct ucp_mem_advise_params {
  */
 ucs_status_t ucp_mem_advise(ucp_context_h context, ucp_mem_h memh,
                             ucp_mem_advise_params_t *params);
+
+
+/**
+ * @ingroup UCP_MEM
+ * @brief UCP memory pack field mask.
+ */
+enum ucp_mkey_pack_flags {
+    UCP_MKEY_PACK_FLAG_RKEY   = UCS_BIT(0), /**< Pack the remote key */
+    UCP_MKEY_PACK_FLAG_SHARED = UCS_BIT(1)  /**< Pack shared memory key */
+};
+
+
+/**
+ * @ingroup UCP_MEM
+ * @brief UCP memory key pack parameters field mask.
+ *
+ * The enumeration allows specifying which fields in
+ * @ref ucp_mkey_pack_params_t are present. It is used to enable backward
+ * compatibility support.
+ */
+enum ucp_mkey_pack_params_field {
+    UCP_MKEY_PACK_PARAM_FIELD_FLAGS = UCS_BIT(0) /**< Pack flags */
+};
+
+
+typedef struct ucp_mkey_pack_params {
+    /**
+     * Mask of valid fields in this structure, using bits from
+     * @ref ucp_mkey_pack_params_field. All fields are mandatory.
+     * Provides ABI compatibility with respect to adding new fields.
+     */
+    uint64_t                field_mask;
+
+    /**
+     * Memory pack flags. This value is optional.
+     * If @ref UCP_MKEY_PACK_PARAM_FIELD_FLAGS is not set in the field_mask,
+     * the value of this field will default to 0.
+     */
+    uint64_t                flags;
+} ucp_mkey_pack_params_t;
+
+
+ucs_status_t ucp_mkey_pack(ucp_context_h context, ucp_mem_h memh,
+                           ucp_mkey_pack_params_t *params, void **buffer_p,
+                           size_t *buffer_size_p);
+
+/**
+ * @ingroup UCP_MEM
+ * @brief UCP memory key buffer release field mask.
+ */
+enum ucp_mkey_buffer_release_flags {
+    UCP_MKEY_BUFFER_RELEASE_FLAG_RKEY   = UCS_BIT(0), /**< Release buffer where
+                                                           a remote key was
+                                                           packed */
+    UCP_MKEY_BUFFER_RELEASE_FLAG_SHARED = UCS_BIT(1)  /**< Release buffer where
+                                                           a shared memory key
+                                                           was packed */
+};
+
+
+/**
+ * @ingroup UCP_MEM
+ * @brief UCP memory key buffer release parameters field mask.
+ *
+ * The enumeration allows specifying which fields in
+ * @ref ucp_mkey_buffer_release_params_t are present. It is used to enable
+ * backward compatibility support.
+ */
+enum ucp_mkey_buffer_release_params_field {
+    UCP_MKEY_BUFFER_RELEASE_PARAM_FIELD_FLAGS = UCS_BIT(0) /**< Release flags */
+};
+
+
+typedef struct ucp_mkey_buffer_release_params {
+    /**
+     * Mask of valid fields in this structure, using bits from
+     * @ref ucp_mkey_buffer_release_params_field. All fields are mandatory.
+     * Provides ABI compatibility with respect to adding new fields.
+     */
+    uint64_t                field_mask;
+
+    /**
+     * Memory key release buffer flags. This value is optional.
+     * If @ref UCP_MKEY_BUFFER_RELEASE_PARAM_FIELD_FLAGS is not set in the
+     * field_mask, the value of this field will default to 0.
+     */
+    uint64_t                flags;
+} ucp_mkey_buffer_release_params_t;
+
+
+/**
+ * @ingroup UCP_MEM
+ * @brief Release packed memory key buffer.
+ *
+ * This routine releases the buffer that was allocated using @ref ucp_mkey_pack
+ * "ucp_mkey_pack()".
+ *
+ * @warning
+ * @li Once memory is released an access to the memory may cause a
+ * failure.
+ * @li If the input memory address was not allocated using
+ * @ref ucp_mkey_pack "ucp_mkey_pack()" routine the behaviour of this routine
+ * is undefined.
+ *
+ * @param [in]  params        Release parameters of memory key buffer.
+ * @param [in]  mkey_buffer   Buffer to release.
+ *
+ * @return Error code as defined by @ref ucs_status_t.
+ */
+ucs_status_t
+ucp_mkey_buffer_release(const ucp_mkey_buffer_release_params_t *params,
+                        void *buffer);
 
 
 /**

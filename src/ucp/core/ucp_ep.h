@@ -162,8 +162,15 @@ enum {
     UCP_EP_INIT_CREATE_AM_LANE_ONLY    = UCS_BIT(8),  /**< Endpoint requires an AM lane only */
     UCP_EP_INIT_KA_FROM_EXIST_LANES    = UCS_BIT(9),  /**< Use only existing lanes to create
                                                            keepalive lane */
-    UCP_EP_INIT_ALLOW_AM_AUX_TL        = UCS_BIT(10)  /**< Endpoint allows selecting of auxiliary
+    UCP_EP_INIT_ALLOW_AM_AUX_TL        = UCS_BIT(10), /**< Endpoint allows selecting of auxiliary
                                                            transports for AM lane */
+    UCP_EP_INIT_FLAG_SHARED_MKEY       = UCS_BIT(11)  /**< Endpoint requires selection transports
+                                                           with @ref UCT_MD_FLAG_SHARED_MKEY
+                                                           capability to be able perform local
+                                                           operation using a peer's memory buffer
+                                                           and memory handle associated with it
+                                                           and created with @ref UCP_MEM_MAP_SHARED
+                                                           capability */
 };
 
 
@@ -181,6 +188,12 @@ typedef struct ucp_ep_config_key_lane {
     size_t               seg_size; /* Maximal fragment size which can be
                                       received by the peer */
 } ucp_ep_config_key_lane_t;
+
+
+typedef enum ucp_ep_config_key_flags {
+    UCP_EP_CONFIG_KEY_FLAG_ERR_HANDLING_MODE_PEER = UCS_BIT(0),
+    UCP_EP_CONFIG_KEY_FLAG_SHARED_MKEY            = UCS_BIT(1)
+} ucp_ep_config_key_flags_t;
 
 
 /*
@@ -229,8 +242,8 @@ struct ucp_ep_config_key {
      * reachable_md_map */
     ucp_rsc_index_t          *dst_md_cmpts;
 
-    /* Error handling mode */
-    ucp_err_handling_mode_t  err_mode;
+    /* Flags which influence an endpoint configuration */
+    uint8_t                  flags;
 };
 
 
@@ -648,6 +661,7 @@ ucp_ep_create_to_worker_addr(ucp_worker_h worker,
                              unsigned *addr_indices, ucp_ep_h *ep_p);
 
 ucs_status_t ucp_ep_create_server_accept(ucp_worker_h worker,
+                                         const ucp_ep_params_t *params,
                                          const ucp_conn_request_h conn_request,
                                          ucp_ep_h *ep_p);
 

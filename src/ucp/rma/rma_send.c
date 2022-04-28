@@ -123,8 +123,11 @@ static void ucp_rma_request_zcopy_completion(uct_completion_t *self)
 static UCS_F_ALWAYS_INLINE ucs_status_t
 ucp_rma_request_init(ucp_request_t *req, ucp_ep_h ep, const void *buffer,
                      size_t length, uint64_t remote_addr, ucp_rkey_h rkey,
-                     uct_pending_callback_t cb, size_t zcopy_thresh)
+                     uct_pending_callback_t cb, size_t zcopy_thresh,
+                     const ucp_request_param_t *param)
 {
+    ucs_status_t status;
+
     req->flags                = 0;
     req->send.ep              = ep;
     req->send.buffer          = (void*)buffer;
@@ -148,6 +151,11 @@ ucp_rma_request_init(ucp_request_t *req, ucp_ep_h ep, const void *buffer,
         return UCS_OK;
     }
 
+    status = ucp_send_request_set_user_memh(req, param->memh->md_map, param);
+    if (status != UCS_OK) {
+        return status;
+    }
+
     return ucp_request_send_buffer_reg_lane(req, req->send.lane, 0);
 }
 
@@ -164,7 +172,7 @@ ucp_rma_nonblocking(ucp_ep_h ep, const void *buffer, size_t length,
                                 {return UCS_STATUS_PTR(UCS_ERR_NO_MEMORY);});
 
     status = ucp_rma_request_init(req, ep, buffer, length, remote_addr, rkey,
-                                  progress_cb, zcopy_thresh);
+                                  progress_cb, zcopy_thresh, param);
     if (ucs_unlikely(status != UCS_OK)) {
         return UCS_STATUS_PTR(status);
     }

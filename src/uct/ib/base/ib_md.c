@@ -266,15 +266,17 @@ static ucs_status_t uct_ib_md_query(uct_md_h uct_md, uct_md_attr_t *md_attr)
 {
     uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
 
-    md_attr->cap.max_alloc        = ULONG_MAX; /* TODO query device */
-    md_attr->cap.max_reg          = ULONG_MAX; /* TODO query device */
-    md_attr->cap.flags            = md->cap_flags;
-    md_attr->cap.alloc_mem_types  = 0;
-    md_attr->cap.access_mem_types = UCS_BIT(UCS_MEMORY_TYPE_HOST);
-    md_attr->cap.detect_mem_types = 0;
-    md_attr->cap.reg_mem_types    = md->reg_mem_types;
-    md_attr->rkey_packed_size     = UCT_IB_MD_PACKED_RKEY_SIZE;
-    md_attr->reg_cost             = md->reg_cost;
+    md_attr->cap.max_alloc           = ULONG_MAX; /* TODO query device */
+    md_attr->cap.max_reg             = ULONG_MAX; /* TODO query device */
+    md_attr->cap.flags               = md->cap_flags;
+    md_attr->cap.alloc_mem_types     = 0;
+    md_attr->cap.access_mem_types    = UCS_BIT(UCS_MEMORY_TYPE_HOST);
+    md_attr->cap.detect_mem_types    = 0;
+    md_attr->cap.reg_mem_types       = md->reg_mem_types;
+    md_attr->rkey_packed_size        = UCT_IB_MD_PACKED_RKEY_SIZE;
+    md_attr->reg_cost                = md->reg_cost;
+    md_attr->global_id               = md->dev.guid;
+    md_attr->shared_mkey_packed_size = sizeof(uint64_t);
     ucs_sys_cpuset_copy(&md_attr->local_cpus, &md->dev.local_cpus);
 
     return UCS_OK;
@@ -765,18 +767,34 @@ uct_ib_mem_reg(uct_md_h uct_md, void *address, size_t length,
     memh = uct_ib_memh_alloc(md);
     if (memh == NULL) {
         uct_md_log_mem_reg_error(flags,
-                                 "md %p: failed to allocate memory handle", md);
+                                 "md %p: failed to allocate memory handle",
+                                 md);
         return UCS_ERR_NO_MEMORY;
     }
 
-    status = uct_ib_mem_reg_internal(uct_md, address, length, flags, 0, memh);
-    if (status != UCS_OK) {
-        uct_ib_memh_free(memh);
-        return status;
-    }
-    *memh_p = memh;
+    if (flags & UCT_MD_MEM_FLAG_SHARED) {
+        uct_ib_mem_init(memh, 0, 0);
+        status = md->ops->reg_shared_key(md, flags, address, length,
+                                         0 /* TODO: remove */, memh);
+        if (status != UCS_OK) {
+            goto err_memh_free;
+        }
 
+        memh->flags |= UCT_IB_MEM_FLAG_NO_RCACHE | UCT_IB_MEM_FLAG_SHARED;
+    } else {
+        status = uct_ib_mem_reg_internal(uct_md, address, length, flags, 0,
+                                         memh);
+        if (status != UCS_OK) {
+            goto err_memh_free;
+        }
+    }
+
+    *memh_p = memh;
     return UCS_OK;
+
+err_memh_free:
+    uct_ib_memh_free(memh);
+    return status;
 }
 
 static ucs_status_t uct_ib_mem_dereg(uct_md_h uct_md,
@@ -797,6 +815,50 @@ static ucs_status_t uct_ib_mem_dereg(uct_md_h uct_md,
         uct_invoke_completion(params->comp, UCS_OK);
     }
 
+    return status;
+}
+
+static ucs_status_t
+uct_ib_md_mem_attach(uct_md_h uct_md, uct_md_mem_attach_params_t *params)
+{
+    const uint64_t *mkey =
+            UCT_MD_MEM_ATTACH_FIELD_VALUE(params, shared_mkey_buffer,
+                                          FIELD_SHARED_MKEY_BUFFER, NULL);
+    uint64_t flags       = UCT_MD_MEM_ATTACH_FIELD_VALUE(params, flags,
+                                                         FIELD_FLAGS, 0);
+    uct_ib_md_t *md      = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_mem_t *ib_memh;
+    ucs_status_t status;
+
+    if (mkey == NULL) {
+        ucs_error("shared_mkey_buffer shouldn't be NULL");
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    ib_memh = uct_ib_memh_alloc(md);
+    if (ib_memh == NULL) {
+        uct_md_log_mem_attach_error(flags,
+                                    "md %p: failed to allocate memory handle",
+                                    md);
+        return UCS_ERR_NO_MEMORY;
+    }
+    uct_ib_mem_init(ib_memh, 0, 0);
+
+    status = md->ops->import_shared_key(md, flags, uct_ib_md_vhca_id(*mkey),
+                                        uct_ib_md_lkey(*mkey), ib_memh);
+    if (status != UCS_OK) {
+        goto out_memh_free;
+    }
+
+    ib_memh->flags |= UCT_IB_MEM_FLAG_NO_RCACHE;
+    if (params->field_mask & UCT_MD_MEM_ATTACH_FIELD_MEMH) {
+        params->memh = ib_memh;
+    }
+
+    return UCS_OK;
+
+out_memh_free:
+    uct_ib_memh_free(ib_memh);
     return status;
 }
 
@@ -871,14 +933,14 @@ uct_ib_mem_advise(uct_md_h uct_md, uct_mem_h memh, void *addr,
 static ucs_status_t
 uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
                  const uct_md_mkey_pack_params_t *params,
-                 void *rkey_buffer)
+                 void *buffer)
 {
     uct_ib_md_t *md     = ucs_derived_of(uct_md, uct_ib_md_t);
     uct_ib_mem_t *memh  = uct_memh;
     unsigned flags      = UCS_PARAM_VALUE(UCT_MD_MKEY_PACK_FIELD, params, flags,
                                           FLAGS, 0);
     uint32_t atomic_rkey;
-    uint32_t rkey;
+    uint32_t mkey;
     ucs_status_t status;
 
     /* create umr only if a user requested atomic access to the
@@ -887,6 +949,7 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
     if ((memh->flags & (UCT_IB_MEM_ACCESS_REMOTE_ATOMIC |
                         UCT_IB_MEM_FLAG_RELAXED_ORDERING)) &&
         !(memh->flags & UCT_IB_MEM_FLAG_ATOMIC_MR) &&
+        !(flags & UCT_MD_MKEY_PACK_FLAG_SHARED) &&
         (memh != md->global_odp))
     {
         /* create UMR on-demand */
@@ -911,11 +974,14 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
         atomic_rkey = UCT_IB_INVALID_MKEY;
     }
 
-    /* Register indirect key, that does not support atomic operations, only if
-     * we have a dedicated atomic key or atomic support wasn't requested */
-    if ((flags & UCT_MD_MKEY_PACK_FLAG_INVALIDATE) &&
-        ((atomic_rkey != UCT_IB_INVALID_MKEY) ||
-         !(memh->flags & UCT_IB_MEM_ACCESS_REMOTE_ATOMIC))) {
+    if (flags & UCT_MD_MKEY_PACK_FLAG_SHARED) {
+        mkey = memh->lkey;
+    } else if ((flags & UCT_MD_MKEY_PACK_FLAG_INVALIDATE) &&
+               ((atomic_rkey != UCT_IB_INVALID_MKEY) ||
+                !(memh->flags & UCT_IB_MEM_ACCESS_REMOTE_ATOMIC))) {
+        /* Register indirect key, that does not support atomic operations, only
+         * if we have a dedicated atomic key or atomic support wasn't requested
+         */
         if (memh->indirect_rkey == UCT_IB_INVALID_MKEY) {
             status = md->ops->reg_indirect_key(md, memh);
             if (status != UCS_OK) {
@@ -923,12 +989,18 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
             }
         }
 
-        rkey = memh->indirect_rkey;
+        mkey = memh->indirect_rkey;
     } else {
-        rkey = memh->rkey;
+        mkey = memh->rkey;
     }
 
-    uct_ib_md_pack_rkey(rkey, atomic_rkey, rkey_buffer);
+    if (flags & UCT_MD_MKEY_PACK_FLAG_SHARED) {
+        ucs_assert(memh->flags & UCT_IB_MEM_FLAG_SHARED);
+        uct_ib_md_pack_shared_mkey(mkey, md->vhca_id, buffer);
+    } else {
+        uct_ib_md_pack_rkey(mkey, atomic_rkey, buffer);
+    }
+
     return UCS_OK;
 }
 
@@ -951,6 +1023,7 @@ static uct_md_ops_t uct_ib_md_ops = {
     .query              = uct_ib_md_query,
     .mem_reg            = uct_ib_mem_reg,
     .mem_dereg          = uct_ib_mem_dereg,
+    .mem_attach         = uct_ib_md_mem_attach,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
     .detect_memory_type = ucs_empty_function_return_unsupported,
@@ -971,6 +1044,10 @@ uct_ib_mem_rcache_reg(uct_md_h uct_md, void *address, size_t length,
     ucs_rcache_region_t *rregion;
     ucs_status_t status;
     uct_ib_mem_t *memh;
+
+    if (flags & UCT_MD_MEM_FLAG_SHARED) {
+        return uct_ib_mem_reg(uct_md, address, length, params, memh_p);
+    }
 
     status = ucs_rcache_get(md->rcache, address, length, PROT_READ|PROT_WRITE,
                             &flags, &rregion);
@@ -1002,10 +1079,15 @@ static ucs_status_t
 uct_ib_mem_rcache_dereg(uct_md_h uct_md,
                         const uct_md_mem_dereg_params_t *params)
 {
-    uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_md_t *md       = ucs_derived_of(uct_md, uct_ib_md_t);
+    uct_ib_mem_t *ib_memh = (uct_ib_mem_t*)params->memh;
     uct_ib_rcache_region_t *region;
 
     UCT_IB_MD_MEM_DEREG_CHECK_PARAMS(md, params);
+
+    if (ucs_unlikely(ib_memh->flags & UCT_IB_MEM_FLAG_NO_RCACHE)) {
+        return uct_ib_mem_dereg(uct_md, params);
+    }
 
     region = uct_ib_rcache_region_from_memh(params->memh);
     if (UCT_MD_MEM_DEREG_FIELD_VALUE(params, flags, FIELD_FLAGS, 0) &
@@ -1024,6 +1106,7 @@ static uct_md_ops_t uct_ib_md_rcache_ops = {
     .query                  = uct_ib_md_query,
     .mem_reg                = uct_ib_mem_rcache_reg,
     .mem_dereg              = uct_ib_mem_rcache_dereg,
+    .mem_attach             = uct_ib_md_mem_attach,
     .mem_advise             = uct_ib_mem_advise,
     .mkey_pack              = uct_ib_mkey_pack,
     .is_sockaddr_accessible = ucs_empty_function_return_zero_int,
@@ -1141,6 +1224,7 @@ static uct_md_ops_t UCS_V_UNUSED uct_ib_md_global_odp_ops = {
     .query              = uct_ib_md_odp_query,
     .mem_reg            = uct_ib_mem_global_odp_reg,
     .mem_dereg          = uct_ib_mem_global_odp_dereg,
+    .mem_attach         = uct_ib_md_mem_attach,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
     .detect_memory_type = ucs_empty_function_return_unsupported,

@@ -80,6 +80,7 @@ protected:
     bool resolve_rma_bw_get_zcopy(entity *e, ucp_rkey_h rkey);
     bool resolve_rma_bw_put_zcopy(entity *e, ucp_rkey_h rkey);
     void test_length0(unsigned flags);
+    void test_rereg(unsigned flags = 0, bool import_mem = false);
     void test_rkey_management(ucp_mem_h memh, bool is_dummy,
                               bool expect_rma_offload);
     bool enable_proto() const;
@@ -88,6 +89,10 @@ private:
     void expect_same_distance(const ucs_sys_dev_distance_t &dist1,
                               const ucs_sys_dev_distance_t &dist2);
     void test_rkey_proto(ucp_mem_h memh);
+    void test_rereg_local_mem(ucp_mem_h memh, const mem_buffer &buf,
+                              size_t size);
+    void test_rereg_imported_mem(ucp_mem_h memh, const mem_buffer &buf,
+                                 size_t size);
 };
 
 bool test_ucp_mmap::resolve_rma(entity *e, ucp_rkey_h rkey)
@@ -416,7 +421,96 @@ UCS_TEST_P(test_ucp_mmap, reg_mem_type) {
     }
 }
 
-UCS_TEST_P(test_ucp_mmap, rereg)
+void test_ucp_mmap::test_rereg_local_mem(ucp_mem_h memh, const mem_buffer &buf,
+                                         size_t size)
+{
+    if (get_variant_value() == VARIANT_NO_RCACHE) {
+        return;
+    }
+
+    ucs_status_t status;
+    const int num_iters     = 4;
+    const void *end_address = UCS_PTR_BYTE_OFFSET(buf.ptr(), size);
+
+    for (int i = 0; i < num_iters; ++i) {
+        size_t offset       = ucs::rand() % size;
+        void *start_address = UCS_PTR_BYTE_OFFSET(buf.ptr(), offset);
+        ucp_mem_h test_memh;
+        ucp_mem_map_params_t params;
+
+        params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                            UCP_MEM_MAP_PARAM_FIELD_LENGTH  |
+                            UCP_MEM_MAP_PARAM_FIELD_FLAGS;
+        params.address    = buf.ptr();
+        params.length     = size;
+        params.flags      = mem_map_flags();
+        params.address    = start_address;
+        params.length     = UCS_PTR_BYTE_DIFF(start_address, end_address);
+        status            = ucp_mem_map(sender().ucph(), &params, &test_memh);
+        ASSERT_UCS_OK(status);
+
+        // Check that the same memory handle was returned from RCACHE
+        EXPECT_EQ(memh, test_memh);
+
+        status = ucp_mem_unmap(sender().ucph(), test_memh);
+        ASSERT_UCS_OK(status);
+    }
+}
+
+void test_ucp_mmap::test_rereg_imported_mem(ucp_mem_h memh,
+                                            const mem_buffer &buf,
+                                            size_t size)
+{
+    ucs_status_t status;
+    void *shared_mkey_buf;
+    size_t shared_mkey_buf_size;
+    ucp_mkey_pack_params_t pack_params;
+    pack_params.field_mask = UCP_MKEY_PACK_PARAM_FIELD_FLAGS;
+    pack_params.flags      = UCP_MKEY_PACK_FLAG_SHARED;
+    status                 = ucp_mkey_pack(sender().ucph(), memh, &pack_params,
+                                           &shared_mkey_buf,
+                                           &shared_mkey_buf_size);
+    ASSERT_UCS_OK(status);
+
+    ucp_mem_h imp_memh;
+    ucp_mem_map_params_t params;
+    params.field_mask         = UCP_MEM_MAP_PARAM_FIELD_FLAGS |
+                                UCP_MEM_MAP_PARAM_FIELD_SHARED_MKEY_BUFFER |
+                                UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                                UCP_MEM_MAP_PARAM_FIELD_LENGTH;
+    params.flags              = UCP_MEM_MAP_SHARED;
+    params.shared_mkey_buffer = shared_mkey_buf;
+    params.address            = buf.ptr();
+    params.length             = size;
+    status                    = ucp_mem_map(receiver().ucph(), &params,
+                                            &imp_memh);
+    ASSERT_UCS_OK(status);
+
+    if (get_variant_value() != VARIANT_NO_RCACHE) {
+        ucp_mem_h test_imp_memh;
+
+        status = ucp_mem_map(receiver().ucph(), &params, &test_imp_memh);
+        ASSERT_UCS_OK(status);
+
+        // Check that the same memory handle was returned from RCACHE
+        EXPECT_EQ(imp_memh, test_imp_memh);
+
+        status = ucp_mem_unmap(receiver().ucph(), test_imp_memh);
+        ASSERT_UCS_OK(status);
+    }
+
+    ucp_mkey_buffer_release_params_t release_params;
+    release_params.field_mask = UCP_MKEY_BUFFER_RELEASE_PARAM_FIELD_FLAGS;
+    release_params.flags      = UCP_MKEY_BUFFER_RELEASE_FLAG_SHARED;
+    status                    = ucp_mkey_buffer_release(&release_params,
+                                                        shared_mkey_buf);
+    ASSERT_UCS_OK(status);
+
+    status = ucp_mem_unmap(receiver().ucph(), imp_memh);
+    ASSERT_UCS_OK(status);
+}
+
+void test_ucp_mmap::test_rereg(unsigned flags, bool import_mem)
 {
     ucs_status_t status;
 
@@ -432,40 +526,45 @@ UCS_TEST_P(test_ucp_mmap, rereg)
                              UCP_MEM_MAP_PARAM_FIELD_FLAGS;
         params.address     = buf.ptr();
         params.length      = size;
-        params.flags       = mem_map_flags();
+        params.flags       = mem_map_flags() | flags;
 
         status = ucp_mem_map(sender().ucph(), &params, &memh);
-        if (status == UCS_ERR_UNSUPPORTED) {
+        if ((status == UCS_ERR_UNSUPPORTED) &&
+            (params.flags & UCP_MEM_MAP_SHARED)) {
             UCS_TEST_SKIP_R("memory sharing is unsupported");
         }
         ASSERT_UCS_OK(status);
 
-        if (get_variant_value() != VARIANT_NO_RCACHE) {
-            const int num_iters     = 4;
-            const void *end_address = UCS_PTR_BYTE_OFFSET(buf.ptr(), size);
-
-            for (int i = 0; i < num_iters; ++i) {
-                size_t offset       = ucs::rand() % size;
-                void *start_address = UCS_PTR_BYTE_OFFSET(buf.ptr(), offset);
-                ucp_mem_h test_memh;
-
-                params.address = start_address;
-                params.length  = UCS_PTR_BYTE_DIFF(start_address, end_address);
-                status         = ucp_mem_map(sender().ucph(), &params,
-                                             &test_memh);
-                ASSERT_UCS_OK(status);
-
-                // Check that the same memory handle was returned from RCACHE
-                EXPECT_EQ(memh, test_memh);
-
-                status = ucp_mem_unmap(sender().ucph(), test_memh);
-                ASSERT_UCS_OK(status);
-            }
+        if (import_mem) {
+            test_rereg_imported_mem(memh, buf, size);
+        } else {
+            test_rereg_local_mem(memh, buf, size);
         }
 
         status = ucp_mem_unmap(sender().ucph(), memh);
         ASSERT_UCS_OK(status);
+
+        if (import_mem) {
+            test_rereg_imported_mem(memh, buf, size);
+        } else {
+            test_rereg_local_mem(memh, buf, size);
+        }
     }
+}
+
+UCS_TEST_P(test_ucp_mmap, rereg)
+{
+    test_rereg();
+}
+
+UCS_TEST_P(test_ucp_mmap, rereg_shared_only)
+{
+    test_rereg(UCP_MEM_MAP_SHARED);
+}
+
+UCS_TEST_P(test_ucp_mmap, reg_shared_and_reimport)
+{
+    test_rereg(UCP_MEM_MAP_SHARED, true);
 }
 
 void test_ucp_mmap::test_length0(unsigned flags)

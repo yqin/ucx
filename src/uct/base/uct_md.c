@@ -324,10 +324,10 @@ ucs_status_t uct_config_modify(void *config, const char *name, const char *value
 }
 
 static ucs_status_t
-uct_md_mkey_pack_params_check(uct_md_h md, uct_mem_h memh, void *rkey_buffer)
+uct_md_mkey_pack_params_check(uct_md_h md, uct_mem_h memh, void *buffer)
 {
     if (ENABLE_PARAMS_CHECK) {
-        return ((md != NULL) && (memh != NULL) && (rkey_buffer != NULL)) ?
+        return ((md != NULL) && (memh != NULL) && (buffer != NULL)) ?
                UCS_OK : UCS_ERR_INVALID_PARAM;
     } else {
         return UCS_OK;
@@ -336,16 +336,16 @@ uct_md_mkey_pack_params_check(uct_md_h md, uct_mem_h memh, void *rkey_buffer)
 
 ucs_status_t uct_md_mkey_pack_v2(uct_md_h md, uct_mem_h memh,
                                  const uct_md_mkey_pack_params_t *params,
-                                 void *rkey_buffer)
+                                 void *buffer)
 {
     ucs_status_t status;
 
-    status = uct_md_mkey_pack_params_check(md, memh, rkey_buffer);
+    status = uct_md_mkey_pack_params_check(md, memh, buffer);
     if (status != UCS_OK) {
         return status;
     }
 
-    return md->ops->mkey_pack(md, memh, params, rkey_buffer);
+    return md->ops->mkey_pack(md, memh, params, buffer);
 }
 
 ucs_status_t uct_md_mkey_pack(uct_md_h md, uct_mem_h memh, void *rkey_buffer)
@@ -381,7 +381,9 @@ ucs_status_t uct_md_query(uct_md_h md, uct_md_attr_t *md_attr)
 {
     ucs_status_t status;
 
-    status = md->ops->query(md, md_attr);
+    md_attr->global_id               = UINT64_MAX;
+    md_attr->shared_mkey_packed_size = 0;
+    status                           = md->ops->query(md, md_attr);
     if (status != UCS_OK) {
         return status;
     }
@@ -512,6 +514,12 @@ ucs_status_t uct_md_mem_dereg_v2(uct_md_h md,
                                  const uct_md_mem_dereg_params_t *params)
 {
     return md->ops->mem_dereg(md, params);
+}
+
+ucs_status_t
+uct_md_mem_attach(uct_md_h md, uct_md_mem_attach_params_t *params)
+{
+    return md->ops->mem_attach(md, params);
 }
 
 ucs_status_t uct_md_mem_query(uct_md_h md, const void *address, size_t length,

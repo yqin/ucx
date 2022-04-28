@@ -246,7 +246,8 @@ ucs_status_t uct_ib_mlx5_devx_create_qp(uct_ib_iface_t *iface,
     }
 
     qp->devx.obj = uct_ib_mlx5_devx_obj_create(dev->ibv_context, in, sizeof(in),
-                                               out, sizeof(out), "QP");
+                                               out, sizeof(out), "QP",
+                                               UCS_LOG_LEVEL_ERROR);
     if (!qp->devx.obj) {
         status = UCS_ERR_IO_ERROR;
         goto err_free_db;
@@ -420,7 +421,7 @@ ucs_status_t uct_ib_mlx5_devx_obj_modify(struct mlx5dv_devx_obj *obj,
 struct mlx5dv_devx_obj *
 uct_ib_mlx5_devx_obj_create(struct ibv_context *context, const void *in,
                             size_t inlen, void *out, size_t outlen,
-                            char *msg_arg)
+                            char *msg_arg, ucs_log_level_t log_level)
 {
     struct mlx5dv_devx_obj *obj;
     unsigned syndrome;
@@ -428,8 +429,9 @@ uct_ib_mlx5_devx_obj_create(struct ibv_context *context, const void *in,
     obj = mlx5dv_devx_obj_create(context, in, inlen, out, outlen);
     if (obj == NULL) {
         syndrome = UCT_IB_MLX5DV_GET(general_obj_out_cmd_hdr, out, syndrome);
-        ucs_error("mlx5dv_devx_obj_create(%s) failed on %s, syndrome 0x%x: %m",
-                  msg_arg, ibv_get_device_name(context->device), syndrome);
+        ucs_log(log_level,
+                "mlx5dv_devx_obj_create(%s) failed on %s, syndrome 0x%x: %m",
+                msg_arg, ibv_get_device_name(context->device), syndrome);
     }
 
     return obj;

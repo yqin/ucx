@@ -1151,6 +1151,7 @@ UCS_PROFILE_FUNC(ucs_status_ptr_t, ucp_am_recv_data_nbx,
         ucp_am_rndv_send_ats(worker, data_desc, UCS_OK);
         recv_length = 0ul;
         status      = UCS_OK;
+        ucp_recv_desc_release(desc);
     } else {
         /* data_desc represents eager message and can be received in place
          * without initializing request */

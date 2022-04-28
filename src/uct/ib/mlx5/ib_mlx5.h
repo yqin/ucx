@@ -186,6 +186,8 @@ enum {
     UCT_IB_MLX5_MD_FLAG_CQE128_ZIP           = UCS_BIT(11),
     /* Device performance is optimized when RDMA_WRITE is not used */
     UCT_IB_MLX5_MD_FLAG_NO_RDMA_WR_OPTIMIZED = UCS_BIT(12),
+    /* Device supports cross-gvmi alias */
+    UCT_IB_MLX5_MD_FLAG_CROSS_GVMI_ALIAS     = UCS_BIT(13),
 
     /* Object to be created by DevX */
     UCT_IB_MLX5_MD_FLAG_DEVX_OBJS_SHIFT  = 16,
@@ -748,7 +750,7 @@ ucs_status_t uct_ib_mlx5_devx_obj_modify(struct mlx5dv_devx_obj *obj,
 struct mlx5dv_devx_obj *
 uct_ib_mlx5_devx_obj_create(struct ibv_context *context, const void *in,
                             size_t inlen, void *out, size_t outlen,
-                            char *msg_arg);
+                            char *msg_arg, ucs_log_level_t log_level);
 
 ucs_status_t
 uct_ib_mlx5_devx_obj_destroy(struct mlx5dv_devx_obj *obj, char *msg_arg);

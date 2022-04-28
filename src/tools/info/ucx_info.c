@@ -45,6 +45,7 @@ static void usage() {
     printf("                  Modifiers to use in combination with above features:\n");
     printf("                    'w' : wakeup\n");
     printf("                    'e' : error handling\n");
+    printf("                    'g' : shared memory key\n");
     printf("\nOther settings:\n");
     printf("  -t <name>       Filter devices information using specified transport (requires -d)\n");
     printf("  -n <count>      Estimated UCP endpoint count (for ucp_init)\n");
@@ -181,6 +182,11 @@ int main(int argc, char **argv)
                             UCP_EP_PARAM_FIELD_ERR_HANDLER;
                     ucp_ep_params.err_mode       = UCP_ERR_HANDLING_MODE_PEER;
                     ucp_ep_params.err_handler.cb = ep_error_callback;
+                    break;
+                case 'g':
+                    ucp_ep_params.field_mask |= UCP_EP_PARAM_FIELD_FLAGS;
+                    ucp_ep_params.flags      |=
+                            UCP_EP_PARAMS_FLAGS_SHARED_MKEY;
                     break;
                 default:
                     usage();

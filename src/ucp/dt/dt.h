@@ -26,8 +26,8 @@ typedef enum ucp_dt_type          ucp_dt_class_t;
  * Memory registration state of a buffer/operation
  */
 typedef struct ucp_dt_reg {
-    ucp_md_map_t                  md_map;    /* Map of used memory domains */
-    uct_mem_h                     memh[UCP_MAX_OP_MDS];
+    ucp_md_map_t    md_map;    /* Map of used memory domains */
+    uct_mem_h       memh[UCP_MAX_OP_MDS];
 } ucp_dt_reg_t;
 
 

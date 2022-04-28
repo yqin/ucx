@@ -1248,6 +1248,82 @@ public:
         modify_config("RNDV_THRESH", "128");
     }
 
+    void* alloc_memhs(ucp_context_h context, size_t length,
+                      ucp_mem_h *exp_memh, ucp_mem_h *imp_memh)
+    {
+        ucs_status_t status;
+        ucp_mem_h memh;
+        ucp_mem_map_params_t mparams;
+        mparams.field_mask = UCP_MEM_MAP_PARAM_FIELD_LENGTH |
+                             UCP_MEM_MAP_PARAM_FIELD_FLAGS;
+        mparams.address    = NULL;
+        mparams.length     = length;
+        mparams.flags      = UCP_MEM_MAP_ALLOCATE | UCP_MEM_MAP_SHARED;
+        status             = ucp_mem_map(sender().ucph(), &mparams, &memh);
+        if (status == UCS_ERR_UNSUPPORTED) {
+            UCS_TEST_SKIP_R("registration of shared data isn't supported");
+        }
+
+        ASSERT_UCS_OK(status);
+        *exp_memh = memh;
+
+        // Get address and length of the allocated buffer
+        ucp_mem_attr_t attr;
+        attr.field_mask     = UCP_MEM_ATTR_FIELD_ADDRESS |
+                              UCP_MEM_ATTR_FIELD_LENGTH;
+        status              = ucp_mem_query(memh, &attr);
+        if (status != UCS_OK) {
+            ucp_mem_unmap(sender().ucph(), *exp_memh);
+        }
+        ASSERT_UCS_OK(status);
+        EXPECT_GE(attr.length, length);
+
+        // Pack and unpack the key emulating that it is traversing throughout
+        // the network
+        void *shared_mkey_buf;
+        size_t shared_mkey_buf_size;
+        ucp_mkey_pack_params_t pack_params;
+        pack_params.field_mask = UCP_MKEY_PACK_PARAM_FIELD_FLAGS;
+        pack_params.flags      = UCP_MKEY_PACK_FLAG_SHARED;
+        ASSERT_UCS_OK(ucp_mkey_pack(sender().ucph(), memh, &pack_params,
+                                    &shared_mkey_buf, &shared_mkey_buf_size));
+
+        mparams.field_mask         =
+                UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                UCP_MEM_MAP_PARAM_FIELD_LENGTH  |
+                UCP_MEM_MAP_PARAM_FIELD_FLAGS |
+                UCP_MEM_MAP_PARAM_FIELD_SHARED_MKEY_BUFFER;
+        mparams.flags              = UCP_MEM_MAP_SHARED;
+        mparams.shared_mkey_buffer = shared_mkey_buf;
+        status                     = ucp_mem_map(context, &mparams, &memh);
+        if (status != UCS_OK) {
+            ucp_mem_unmap(sender().ucph(), *exp_memh);
+        }
+
+        ASSERT_UCS_OK(status);
+        *imp_memh = memh;
+
+        ucp_mkey_buffer_release_params_t release_params;
+        release_params.field_mask = UCP_MKEY_BUFFER_RELEASE_PARAM_FIELD_FLAGS;
+        release_params.flags      = UCP_MKEY_BUFFER_RELEASE_FLAG_SHARED;
+        status                    = ucp_mkey_buffer_release(&release_params,
+                                                            shared_mkey_buf);
+        if (status != UCS_OK) {
+            ucp_mem_unmap(sender().ucph(), *exp_memh);
+            ucp_mem_unmap(context, *imp_memh);
+        }
+        ASSERT_UCS_OK(status);
+
+        return attr.address;
+    }
+
+    void free_memhs(ucp_context_h context, ucp_mem_h exp_memh,
+                    ucp_mem_h imp_memh)
+    {
+        ASSERT_UCS_OK(ucp_mem_unmap(sender().ucph(), exp_memh));
+        ASSERT_UCS_OK(ucp_mem_unmap(context, imp_memh));
+    }
+
     ucs_status_t am_data_handler(const void *header, size_t header_length,
                                  void *data, size_t length,
                                  const ucp_am_recv_param_t *rx_param)
@@ -1309,7 +1385,55 @@ public:
         return UCS_OK;
     }
 
+    static void am_data_rndv_recv_cb(void *request, ucs_status_t status,
+                                     size_t length, void *user_data)
+    {
+        test_ucp_am_nbx_rndv *self = reinterpret_cast<test_ucp_am_nbx_rndv*>(user_data);
+
+        EXPECT_UCS_OK(status);
+        self->m_am_received = true;
+
+        self->free_memhs(self->receiver().ucph(),
+                         self->m_rx_memh, self->m_imp_memh);
+    }
+
+    static ucs_status_t am_data_rx_shared_mkey_rndv_cb(
+                          void *arg, const void *header, size_t header_length,
+                          void *data, size_t length,
+                          const ucp_am_recv_param_t *param)
+    {
+        test_ucp_am_nbx_rndv *self = reinterpret_cast<test_ucp_am_nbx_rndv*>(arg);
+
+        EXPECT_FALSE(self->m_am_received);
+
+        void *address = self->alloc_memhs(self->receiver().ucph(), length,
+                                          &self->m_rx_memh, &self->m_imp_memh);
+
+        ucp_request_param_t op_param;
+        op_param.op_attr_mask = UCP_OP_ATTR_FIELD_MEMH |
+                                UCP_OP_ATTR_FIELD_CALLBACK |
+                                UCP_OP_ATTR_FIELD_USER_DATA |
+                                UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+        op_param.memh         = self->m_imp_memh;
+        op_param.cb.recv_am   = am_data_rndv_recv_cb;
+        op_param.user_data    = self;
+        ucs_status_ptr_t rptr = ucp_am_recv_data_nbx(self->receiver().worker(),
+                                                     data, address, length,
+                                                     &op_param);
+        ucp_request_release(rptr);
+
+        return UCS_INPROGRESS;
+    }
+
+private:
+    unsigned enable_proto()
+    {
+        return get_variant_value(1);
+    }
+
+protected:
     ucs_status_t m_status;
+    ucp_mem_h    m_imp_memh;
 };
 
 UCS_TEST_P(test_ucp_am_nbx_rndv, rndv_auto, "RNDV_SCHEME=auto")
@@ -1408,6 +1532,30 @@ UCS_TEST_P(test_ucp_am_nbx_rndv, reject_rndv)
         EXPECT_EQ(m_status, request_wait(sptr));
         EXPECT_TRUE(m_am_received);
     }
+}
+
+UCS_TEST_P(test_ucp_am_nbx_rndv, shared_mkey)
+{
+    skip_loopback();
+
+    set_am_data_handler(receiver(), TEST_AM_NBX_ID,
+                        am_data_rx_shared_mkey_rndv_cb, this);
+    ucp_mem_h exp_memh, imp_memh;
+    m_am_received = false;
+    size_t length = 512 * UCS_KBYTE;
+    void *address = alloc_memhs(sender().ucph(), length, &exp_memh, &imp_memh);
+    ASSERT_TRUE(address != NULL);
+
+    ucp_request_param_t param;
+    param.op_attr_mask    = UCP_OP_ATTR_FIELD_MEMH;
+    param.memh            = imp_memh;
+    ucs_status_ptr_t sptr = ucp_am_send_nbx(sender().ep(), TEST_AM_NBX_ID,
+                                            NULL, 0ul, address, length,
+                                            &param);
+
+    EXPECT_EQ(m_status, request_wait(sptr));
+    EXPECT_TRUE(m_am_received);
+    free_memhs(sender().ucph(), exp_memh, imp_memh);
 }
 
 UCS_TEST_P(test_ucp_am_nbx_rndv, deferred_reject_rndv)

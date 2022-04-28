@@ -267,7 +267,7 @@ print_ucp_ep_info(ucp_worker_h worker, ucp_worker_h peer_worker,
 
         ep_params.field_mask      |= UCP_EP_PARAM_FIELD_FLAGS |
                                      UCP_EP_PARAM_FIELD_SOCK_ADDR;
-        ep_params.flags            = UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
+        ep_params.flags           |= UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
         ep_params.sockaddr.addr    = (struct sockaddr*)&connect_saddr;
         ep_params.sockaddr.addrlen = sizeof(connect_saddr);
     } else {

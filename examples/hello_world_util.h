@@ -58,9 +58,7 @@ static ucs_memory_type_t test_mem_type = UCS_MEMORY_TYPE_HOST;
     } while(0)
 
 
-void print_common_help(void);
-
-void *mem_type_malloc(size_t length)
+static inline void *mem_type_malloc(size_t length)
 {
     void *ptr;
 
@@ -85,7 +83,7 @@ void *mem_type_malloc(size_t length)
     return ptr;
 }
 
-void mem_type_free(void *address)
+static inline void mem_type_free(void *address)
 {
     switch (test_mem_type) {
     case UCS_MEMORY_TYPE_HOST:
@@ -103,7 +101,7 @@ void mem_type_free(void *address)
     }
 }
 
-void *mem_type_memcpy(void *dst, const void *src, size_t count)
+static inline void *mem_type_memcpy(void *dst, const void *src, size_t count)
 {
     switch (test_mem_type) {
     case UCS_MEMORY_TYPE_HOST:
@@ -123,7 +121,7 @@ void *mem_type_memcpy(void *dst, const void *src, size_t count)
     return dst;
 }
 
-void *mem_type_memset(void *dst, int value, size_t count)
+static inline void *mem_type_memset(void *dst, int value, size_t count)
 {
     switch (test_mem_type) {
     case UCS_MEMORY_TYPE_HOST:
@@ -143,7 +141,7 @@ void *mem_type_memset(void *dst, int value, size_t count)
     return dst;
 }
 
-int check_mem_type_support(ucs_memory_type_t mem_type)
+static inline int check_mem_type_support(ucs_memory_type_t mem_type)
 {
     switch (test_mem_type) {
     case UCS_MEMORY_TYPE_HOST:
@@ -163,7 +161,7 @@ int check_mem_type_support(ucs_memory_type_t mem_type)
     return 0;
 }
 
-ucs_memory_type_t parse_mem_type(const char *opt_arg)
+static inline ucs_memory_type_t parse_mem_type(const char *opt_arg)
 {
     if (!strcmp(opt_arg, "host")) {
         return UCS_MEMORY_TYPE_HOST;
@@ -180,7 +178,7 @@ ucs_memory_type_t parse_mem_type(const char *opt_arg)
     return UCS_MEMORY_TYPE_LAST;
 }
 
-void print_common_help()
+static inline void print_common_help()
 {
     fprintf(stderr, "  -p <port>     Set alternative server port (default:13337)\n");
     fprintf(stderr, "  -6            Use IPv6 address in data exchange\n");
@@ -195,7 +193,8 @@ void print_common_help()
     }
 }
 
-int connect_common(const char *server, uint16_t server_port, sa_family_t af)
+static inline int connect_common(const char *server, uint16_t server_port,
+                                 sa_family_t af)
 {
     int sockfd   = -1;
     int listenfd = -1;

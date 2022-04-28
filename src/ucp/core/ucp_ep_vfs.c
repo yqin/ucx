@@ -124,7 +124,9 @@ void ucp_ep_vfs_init(ucp_ep_h ep)
     ucs_vfs_obj_add_ro_file(ep, ucp_ep_vfs_read_peer_name, NULL, 0,
                             "peer_name");
 
-    err_mode = ucp_ep_config(ep)->key.err_mode;
+    err_mode = (ucp_ep_config(ep)->key.flags &
+                UCP_EP_CONFIG_KEY_FLAG_ERR_HANDLING_MODE_PEER) ?
+               UCP_ERR_HANDLING_MODE_PEER : UCP_ERR_HANDLING_MODE_NONE;
     ucs_vfs_obj_add_ro_file(ep, ucs_vfs_show_primitive,
                             (void*)ucp_err_handling_mode_names[err_mode],
                             UCS_VFS_TYPE_STRING, "error_mode");

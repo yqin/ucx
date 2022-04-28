@@ -206,7 +206,8 @@ typedef enum {
 typedef enum {
     UCT_MD_MEM_DEREG_FIELD_MEMH       = UCS_BIT(0), /**< memh field */
     UCT_MD_MEM_DEREG_FIELD_FLAGS      = UCS_BIT(1), /**< flags field */
-    UCT_MD_MEM_DEREG_FIELD_COMPLETION = UCS_BIT(2)  /**< comp field */
+    UCT_MD_MEM_DEREG_FIELD_COMPLETION = UCS_BIT(2), /**< comp field */
+    UCT_MD_MEM_DEREG_FIELD_ADDRESS    = UCS_BIT(3), /**< address field */
 } uct_md_mem_dereg_field_mask_t;
 
 
@@ -246,6 +247,18 @@ typedef enum {
 } uct_iface_is_reachable_field_mask_t;
 
 
+/**
+ * @ingroup UCT_MD
+ * @brief MD memory attach operation field mask flags.
+ */
+typedef enum {
+    UCT_MD_MEM_ATTACH_FIELD_FLAGS              = UCS_BIT(0),
+    UCT_MD_MEM_ATTACH_FIELD_SHARED_MKEY_BUFFER = UCS_BIT(1),
+    UCT_MD_MEM_ATTACH_FIELD_MEMH               = UCS_BIT(2),
+    UCT_MD_MEM_ATTACH_FIELD_ADDRESS            = UCS_BIT(3)
+} uct_md_mem_attach_field_mask_t;
+
+
 typedef enum {
     /**
      * Invalidate the memory region. If this flag is set then memory region is
@@ -271,8 +284,31 @@ typedef enum {
      * in order for @ref UCT_MD_MEM_DEREG_FLAG_INVALIDATE flag to function
      * the @ref UCT_MD_MKEY_PACK_FLAG_INVALIDATE flag must be set.
      */
-    UCT_MD_MKEY_PACK_FLAG_INVALIDATE = UCS_BIT(0)
+    UCT_MD_MKEY_PACK_FLAG_INVALIDATE = UCS_BIT(0),
+
+    /**
+     * The flag is used to indicate that the memory region could be accessed
+     * by another process using the same MD to perform UCT operations.
+     */
+    UCT_MD_MKEY_PACK_FLAG_SHARED     = UCS_BIT(1)
 } uct_md_mkey_pack_flags_t;
+
+
+typedef enum {
+    /**
+     * Hide errors on memory attach.
+     */
+    UCT_MD_MEM_ATTACH_FLAG_HIDE_ERRORS = UCS_BIT(0),
+
+    /**
+     * The flag is used indicate that memory handle should be created to attach
+     * to the memory region shared by a peer. This flag requires that a shared
+     * memory key is passed through @ref uct_md_mem_attach_field_mask_t and
+     * the resulted local memory handle could be obtained from @a memh field of
+     * @ref uct_md_mem_attach_field_mask_t.
+     */
+    UCT_MD_MEM_ATTACH_FLAG_SHARED      = UCS_BIT(1),
+} uct_md_mem_attach_flags_t;
 
 
 /**
@@ -365,6 +401,12 @@ typedef struct uct_md_mem_dereg_params {
      * invalidated.
      */
     uct_completion_t             *comp;
+
+    /**
+     * Address of a memory buffer attached to a peer's memory buffer which
+     * should be unmapped.
+     */
+    void                         *address;
 } uct_md_mem_dereg_params_t;
 
 
@@ -434,6 +476,44 @@ typedef struct uct_iface_is_reachable_params {
 
 /**
  * @ingroup UCT_RESOURCE
+ * @brief Operation parameters passed to @ref uct_md_mem_attach.
+ */
+typedef struct uct_md_mem_attach_params {
+    /**
+     * Mask of valid fields in this structure and operation flags, using
+     * bits from @ref uct_md_mem_attach_field_mask_t. Fields not specified in
+     * this mask will be ignored. Provides ABI compatibility with respect to
+     * adding new fields.
+     */
+    uint64_t                     field_mask;
+
+    /**
+     * Operation specific flags, using bits from
+     * @ref uct_md_mem_attach_flags_t.
+     */
+    uint64_t                     flags;
+
+    /**
+     * Shared memory key buffer.
+     */
+    const void                   *shared_mkey_buffer;
+
+    /**
+     * Local memory handle to access a memory buffer shared by a peer.
+     * This field is set by UCT layer.
+     */
+    uct_mem_h                    memh;
+
+    /**
+     * Address of a memory buffer which is a mapping of a buffer shared by a
+     * peer into a local virtual memory space.
+     */
+    void                         *address;
+} uct_md_mem_attach_params_t;
+
+
+/**
+ * @ingroup UCT_RESOURCE
  * @brief Get interface performance attributes, by memory types and operation.
  *        A pointer to uct_perf_attr_t struct must be passed, with the memory
  *        types and operation members initialized. Overhead and bandwidth
@@ -489,22 +569,38 @@ ucs_status_t uct_md_mem_dereg_v2(uct_md_h md,
 /**
  * @ingroup UCT_MD
  *
- * @brief Pack a remote key.
+ * @brief Pack a memory key as a remote or shared one.
  *
  * @param [in]  md          Handle to memory domain.
  * @param [in]  memh        Pack a remote key for this memory handle.
  * @param [in]  params      Operation parameters, see @ref
  *                          uct_md_mkey_pack_params_t.
- * @param [out] rkey_buffer Pointer to a buffer to hold the packed remote key.
+ * @param [out] buffer      Pointer to a buffer to hold the packed key.
  *                          The size of this buffer has should be at least
- *                          @ref uct_md_attr_t::rkey_packed_size, as returned by
- *                          @ref uct_md_query.
+ *                          @ref uct_md_attr_t::rkey_packed_size or
+ *                          @ref uct_md_attr_t::shared_mkey_packed_size, as
+ *                          returned by @ref uct_md_query.
+ *
  * @return                  Error code.
  */
 ucs_status_t uct_md_mkey_pack_v2(uct_md_h md, uct_mem_h memh,
                                  const uct_md_mkey_pack_params_t *params,
-                                 void *rkey_buffer);
+                                 void *buffer);
 
+
+/**
+ * @ingroup UCT_MD
+ *
+ * @brief Locally attach to a remote memory.
+ *
+ * @param [in]  md            Handle to memory domain.
+ * @param [in]  params        Attach parameters, see @ref
+ *                            uct_md_mem_attach_params_t.
+ *
+ * @return                    Error code.
+ */
+ucs_status_t
+uct_md_mem_attach(uct_md_h md, uct_md_mem_attach_params_t *params);
 
 /**
  * @ingroup UCT_RESOURCE

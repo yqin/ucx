@@ -80,9 +80,6 @@ static struct err_handling {
 } err_handling_opt;
 
 static ucs_status_t ep_status   = UCS_OK;
-static uint16_t server_port     = 13337;
-static sa_family_t ai_family    = AF_INET;
-static long test_string_length  = 16;
 static const ucp_tag_t tag      = 0x1337a880u;
 static const ucp_tag_t tag_mask = UINT64_MAX;
 static const char *addr_msg_str = "UCX address message";

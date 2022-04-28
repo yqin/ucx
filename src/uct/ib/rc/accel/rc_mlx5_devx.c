@@ -248,7 +248,8 @@ uct_rc_mlx5_devx_init_rx_tm(uct_rc_mlx5_iface_common_t *iface,
 
     iface->rx.srq.devx.obj = uct_ib_mlx5_devx_obj_create(dev->ibv_context, in,
                                                          sizeof(in), out,
-                                                         sizeof(out), "XRQ");
+                                                         sizeof(out), "XRQ",
+                                                         UCS_LOG_LEVEL_ERROR);
     if (iface->rx.srq.devx.obj == NULL) {
         status = UCS_ERR_IO_ERROR;
         goto err_cleanup_srq;
@@ -295,7 +296,8 @@ ucs_status_t uct_rc_mlx5_devx_init_rx(uct_rc_mlx5_iface_common_t *iface,
 
     iface->rx.srq.devx.obj = uct_ib_mlx5_devx_obj_create(dev->ibv_context, in,
                                                          sizeof(in), out,
-                                                         sizeof(out), "RMP");
+                                                         sizeof(out), "RMP",
+                                                         UCS_LOG_LEVEL_ERROR);
     if (iface->rx.srq.devx.obj == NULL) {
         status = UCS_ERR_IO_ERROR;
         goto err_cleanup_srq;

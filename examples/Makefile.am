@@ -11,6 +11,8 @@ dist_examples_DATA =   \
 	ucp_hello_world.c  \
 	uct_hello_world.c  \
 	ucp_client_server.c \
+	ucp_shared_mkey.c \
+	ucp_util.c \
 	ucp_util.h
 
 if HAVE_CUDA
@@ -34,16 +36,18 @@ installcheck-local:
 	$(CC) -o uct_hello_world   $(examplesdir)/uct_hello_world.c   -luct $(EXAMPLE_CCLD_FLAGS)
 	$(CC) -o ucp_hello_world   $(examplesdir)/ucp_hello_world.c   -lucp $(EXAMPLE_CCLD_FLAGS)
 	$(CC) -o ucp_client_server $(examplesdir)/ucp_client_server.c -lucp $(EXAMPLE_CCLD_FLAGS)
-	$(RM) *.o uct_hello_world ucp_hello_world ucp_client_server
+	$(CC) -o ucp_shared_mkey   $(examplesdir)/ucp_shared_mkey.c   -lucp $(EXAMPLE_CCLD_FLAGS)
+	$(RM) *.o uct_hello_world ucp_hello_world ucp_client_server ucp_shared_mkey
 
 if HAVE_EXAMPLES
 
 noinst_PROGRAMS = \
 	ucp_hello_world \
 	uct_hello_world \
-	ucp_client_server
+	ucp_client_server \
+	ucp_shared_mkey
 
-ucp_hello_world_SOURCES  = ucp_hello_world.c
+ucp_hello_world_SOURCES  = ucp_hello_world.c ucp_util.c
 ucp_hello_world_CFLAGS   = $(BASE_CFLAGS) $(EXAMPLE_CUDA_CFLAGS)
 ucp_hello_world_CPPFLAGS = $(BASE_CPPFLAGS) $(EXAMPLE_CUDA_CPPFLAGS)
 ucp_hello_world_LDFLAGS  = $(EXAMPLE_CUDA_LD_FLAGS)
@@ -59,12 +63,20 @@ uct_hello_world_LDADD    = $(top_builddir)/src/ucs/libucs.la \
                            $(top_builddir)/src/uct/libuct.la \
                            $(EXAMPLE_CUDA_LIBS)
 
-ucp_client_server_SOURCES  = ucp_client_server.c
+ucp_client_server_SOURCES  = ucp_client_server.c ucp_util.c ucp_client_server_util.c
 ucp_client_server_CFLAGS   = $(BASE_CFLAGS) $(EXAMPLE_CUDA_CFLAGS)
 ucp_client_server_CPPFLAGS = $(BASE_CPPFLAGS) $(EXAMPLE_CUDA_CPPFLAGS)
 ucp_client_server_LDFLAGS  = $(EXAMPLE_CUDA_LD_FLAGS)
 ucp_client_server_LDADD    = $(top_builddir)/src/ucs/libucs.la \
                              $(top_builddir)/src/ucp/libucp.la \
                              $(EXAMPLE_CUDA_LIBS)
+
+ucp_shared_mkey_SOURCES  = ucp_shared_mkey.c ucp_util.c ucp_client_server_util.c
+ucp_shared_mkey_CFLAGS   = $(BASE_CFLAGS) $(EXAMPLE_CUDA_CFLAGS)
+ucp_shared_mkey_CPPFLAGS = $(BASE_CPPFLAGS) $(EXAMPLE_CUDA_CPPFLAGS)
+ucp_shared_mkey_LDFLAGS  = $(EXAMPLE_CUDA_LD_FLAGS)
+ucp_shared_mkey_LDADD    = $(top_builddir)/src/ucs/libucs.la \
+                           $(top_builddir)/src/ucp/libucp.la \
+                           $(EXAMPLE_CUDA_LIBS)
 
 endif

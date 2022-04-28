@@ -55,9 +55,15 @@ enum {
     UCT_IB_MEM_MULTITHREADED         = UCS_BIT(3), /**< The memory region registration
                                                         handled by chunks in parallel
                                                         threads */
-    UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4)  /**< The memory region will issue
+    UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4), /**< The memory region will issue
                                                         PCIe writes with relaxed order
                                                         attribute */
+    UCT_IB_MEM_FLAG_SHARED           = UCS_BIT(5), /**< Memory handle was created with
+                                                        the ability to share an access
+                                                        to a memory buffer with a peer
+                                                        for doing operations */
+    UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(6)  /**< Memory handle wasn't stored
+                                                        in RCACHE */
 };
 
 enum {
@@ -151,6 +157,7 @@ typedef struct uct_ib_md {
      * flush_remote_pack and atomic_mr_id values are passed in iface address to
      * implement flush remote operation. */
     uint32_t                 flush_rkey;
+    uint32_t                 vhca_id;
 } uct_ib_md_t;
 
 
@@ -351,6 +358,60 @@ typedef ucs_status_t (*uct_ib_md_mem_prefetch_func_t)(uct_ib_md_t *md,
 typedef ucs_status_t (*uct_ib_md_get_atomic_mr_id_func_t)(uct_ib_md_t *md,
                                                           uint8_t *mr_id);
 
+
+/**
+ * Memory domain method to register crossed mkey for memory area.
+ *
+ * @param [in] ib_md           Memory domain.
+ *
+ * @param [in] flags           UCT memory registration flags.
+ *
+ * @param [in] address         Memory area start address (HOST).
+ *
+ * @param [in] length          Memory area length (HOST).
+ *
+ * @param [in] allowed_gvmi_id Allowed GVMI ID (DPU).
+ *
+ * @param [out] ib_memh        Memory region handle.
+ *                             Method should initialize lkey & rkey.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_reg_shared_key_func_t)(uct_ib_md_t *ib_md,
+                                                        uint64_t flags,
+                                                        void *address,
+                                                        size_t length,
+                                                        uint32_t allowed_gvmi_id,
+                                                        uct_ib_mem_t *ib_memh);
+
+
+/**
+ * Memory domain method to register crossing mkey for memory area.
+ *
+ * @param [in] ib_md          Memory domain.
+ *
+ * @param [in] flags          UCT memory attach flags.
+ *
+ * @param [in] address        Memory area start address (HOST).
+ *
+ * @param [in] length         Memory area length (HOST).
+ *
+ * @param [in] target_gvmi_id Target GVMI ID (HOST).
+ *
+ * @param [in] target_mkey    Target mkey this mkey refers to (HOST).
+ *
+ * @param [out] ib_memh       Memory region handle.
+ *                            Method should initialize lkey and rkey.
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_import_shared_key_func_t)(uct_ib_md_t *ib_md,
+                                                           uint64_t flags,
+                                                           uint32_t target_gvmi_id,
+                                                           uint32_t target_mkey,
+                                                           uct_ib_mem_t *ib_memh);
+
+
 typedef struct uct_ib_md_ops {
     uct_ib_md_open_func_t                open;
     uct_ib_md_cleanup_func_t             cleanup;
@@ -363,6 +424,8 @@ typedef struct uct_ib_md_ops {
     uct_ib_md_dereg_multithreaded_func_t dereg_multithreaded;
     uct_ib_md_mem_prefetch_func_t        mem_prefetch;
     uct_ib_md_get_atomic_mr_id_func_t    get_atomic_mr_id;
+    uct_ib_md_reg_shared_key_func_t      reg_shared_key;
+    uct_ib_md_import_shared_key_func_t   import_shared_key;
 } uct_ib_md_ops_t;
 
 
@@ -405,6 +468,18 @@ static inline uint32_t uct_ib_md_direct_rkey(uct_rkey_t uct_rkey)
 }
 
 
+static inline uint32_t uct_ib_md_lkey(uint64_t shared_mkey)
+{
+    return (uint32_t)shared_mkey;
+}
+
+
+static inline uint32_t uct_ib_md_vhca_id(uint64_t shared_mkey)
+{
+    return shared_mkey >> 32;
+}
+
+
 static uint32_t uct_ib_md_indirect_rkey(uct_rkey_t uct_rkey)
 {
     return uct_rkey >> 32;
@@ -417,7 +492,17 @@ uct_ib_md_pack_rkey(uint32_t rkey, uint32_t atomic_rkey, void *rkey_buffer)
     uint64_t *rkey_p = (uint64_t*)rkey_buffer;
 
     *rkey_p = (((uint64_t)atomic_rkey) << 32) | rkey;
-    ucs_trace("packed rkey: direct 0x%x indirect 0x%x", rkey, atomic_rkey);
+     ucs_trace("packed rkey: direct 0x%x indirect 0x%x", rkey, atomic_rkey);
+}
+
+
+static UCS_F_ALWAYS_INLINE void
+uct_ib_md_pack_shared_mkey(uint32_t lkey, uint32_t vhca_id, void *buffer)
+{
+    uint64_t *mkey_p = (uint64_t*)buffer;
+
+    *mkey_p = (((uint64_t)vhca_id) << 32) | lkey;
+     ucs_trace("packed shared mkey: lkey 0x%x vhca_id 0x%x", lkey, vhca_id);
 }
 
 

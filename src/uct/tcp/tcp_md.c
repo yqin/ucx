@@ -52,6 +52,7 @@ static uct_md_ops_t uct_tcp_md_ops = {
     .mkey_pack          = ucs_empty_function_return_success,
     .mem_reg            = uct_md_dummy_mem_reg,
     .mem_dereg          = uct_md_dummy_mem_dereg,
+    .mem_attach         = ucs_empty_function_return_unsupported,
     .detect_memory_type = ucs_empty_function_return_unsupported
 };
 

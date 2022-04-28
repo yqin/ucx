@@ -110,10 +110,13 @@ typedef struct ucp_rkey {
         };
     };
 #if ENABLE_PARAMS_CHECK
-    ucp_ep_h                          ep;
+    union {
+        ucp_ep_h                      ep;
+        ucp_worker_h                  worker;
+    };
 #endif
-    ucp_md_map_t                      md_map;          /* Which *remote* MDs have valid memory handles */
-    ucp_tl_rkey_t                     tl_rkey[0];      /* UCT rkey for every remote MD */
+    ucp_md_map_t                      md_map;     /* Which *remote* MDs have valid memory handles */
+    ucp_tl_rkey_t                     tl_rkey[0]; /* UCT rkey for every remote MD */
 } ucp_rkey_t;
 
 
