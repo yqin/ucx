@@ -467,7 +467,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_ep_rkey_unpack_internal,
             goto err_destroy;
         }
     } else {
-     //   ucp_rkey_resolve_inner(rkey, ep);
+        ucp_rkey_resolve_inner(rkey, ep);
     }
 
     ucs_trace("ep %p: unpacked rkey %p md_map 0x%" PRIx64 " type %s", ep, rkey,
