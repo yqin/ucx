@@ -2774,6 +2774,7 @@ ucs_status_t ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t *para
  * @return Error code as defined by @ref ucs_status_t
  */
 ucs_status_t ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh);
+ucs_status_t ucp_mem_unmap_force(ucp_context_h context, ucp_mem_h memh);
 
 
 /**

@@ -106,7 +106,9 @@ ucp_memh_put(ucp_context_h context, ucp_mem_h memh, int invalidate)
     }
 
     UCP_THREAD_CS_ENTER(&context->mt_lock);
-    if (invalidate && context->config.ext.mem_invalidate) {
+    if (invalidate && 
+        (context->config.ext.mem_invalidate ||
+         (memh->flags & UCP_MEM_FLAG_NEED_INVALIDATE))) {
         ucs_rcache_region_invalidate(rcache, &memh->super,
                 (ucs_rcache_invalidate_comp_func_t)ucs_empty_function, NULL);
     }

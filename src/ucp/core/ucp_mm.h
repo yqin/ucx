@@ -28,8 +28,9 @@ enum {
     UCP_MEM_FLAG_SHARED     = UCS_BIT(2), /* Memory handle was created as shared
                                            * with a peer
                                            */
-    UCP_MEM_FLAG_IN_RCACHE  = UCS_BIT(3)  /* Memory handle was stored in RCACHE
+    UCP_MEM_FLAG_IN_RCACHE  = UCS_BIT(3), /* Memory handle was stored in RCACHE
                                            */
+    UCP_MEM_FLAG_NEED_INVALIDATE = UCS_BIT(4)
 };
 
 

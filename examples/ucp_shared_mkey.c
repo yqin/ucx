@@ -112,9 +112,13 @@ static int shared_mem_import(ucp_context_h ucp_context, void *address,
 }
 
 static void shared_mem_import_release(ucp_context_h ucp_context,
-                                      ucp_mem_h memh)
+                                      ucp_mem_h memh, int force)
 {
-    ucp_mem_unmap(ucp_context, memh);
+    if (force) {
+        ucp_mem_unmap_force(ucp_context, memh);
+    } else {
+        ucp_mem_unmap(ucp_context, memh);
+    }
 }
 
 static int shared_mem_export(ucp_context_h ucp_context, size_t length,
@@ -499,6 +503,8 @@ static int shared_mem_do_operation(ucp_context_h ucp_context,
                                    shared_mem_req_t *shared_mem_req_buf,
                                    int current_iter)
 {
+    int force                 = !use_prealloc_buffer ||
+                                (current_iter == num_iterations);
     void *send_shared_mem_buf = (void*)(shared_mem_req_buf + 1);
     void *recv_shared_mem_buf =
             (void*)((char*)(shared_mem_req_buf + 1) +
@@ -536,15 +542,9 @@ static int shared_mem_do_operation(ucp_context_h ucp_context,
         break;
     }
 
-    shared_mem_import_release(ucp_context, recv_memh);
-    /*if (!use_prealloc_buffer || (current_iter == num_iterations)) {
-        shared_mem_import_release(ucp_context, recv_memh);
-    }*/
+    shared_mem_import_release(ucp_context, recv_memh, force);
 out_send_shared_mem_import_release:
-    shared_mem_import_release(ucp_context, send_memh);
-    /*if (!use_prealloc_buffer || (current_iter == num_iterations)) {
-        shared_mem_import_release(ucp_context, send_memh);
-    }*/
+    shared_mem_import_release(ucp_context, send_memh, force);
 out:
     return ret;
 }

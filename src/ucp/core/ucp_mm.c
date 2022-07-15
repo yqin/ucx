@@ -1110,6 +1110,13 @@ out:
     return status;
 }
 
+ucs_status_t ucp_mem_unmap_force(ucp_context_h context, ucp_mem_h memh)
+{
+    memh->flags |= UCP_MEM_FLAG_NEED_INVALIDATE;
+    ucp_memh_put(context, memh, !--memh->map_count);
+    return UCS_OK;
+}
+
 ucs_status_t ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh)
 {
     ucp_memh_put(context, memh, !--memh->map_count);
