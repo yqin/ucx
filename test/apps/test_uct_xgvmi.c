@@ -105,7 +105,7 @@ ucs_status_t do_export(uct_md_h md, uct_component_h component,
     uct_md_mkey_pack_params_t mkey_pack_params;
     uint8_t shared_mkey_buf[1024];
     uint64_t shared_mkey;
-    ucs_status_t status;
+    ucs_status_t status = UCS_OK;
     uct_mem_h memh;
     void *ptr;
     int ret;
