@@ -47,7 +47,8 @@ BEGIN_C_DECLS
  * of DSB. The barrier used for synchronization of access between write back
  * and device mapped memory (PCIe BAR).
  */
-#define ucs_memory_bus_store_fence()  ucs_aarch64_dmb(oshst)
+//#define ucs_memory_bus_store_fence()  ucs_aarch64_dmb(oshst)
+#define ucs_memory_bus_store_fence()  ucs_aarch64_dsb(st)
 #define ucs_memory_bus_load_fence()   ucs_aarch64_dmb(oshld)
 
 /* The macro is used to flush all pending stores from write combining buffer.
@@ -57,11 +58,13 @@ BEGIN_C_DECLS
 #define ucs_memory_bus_cacheline_wc_flush()
 #else
 /* The macro is used to flush stores to Normal NC or Device memory */
-#define ucs_memory_bus_cacheline_wc_flush()     ucs_aarch64_dmb(oshst)
+//#define ucs_memory_bus_cacheline_wc_flush()     ucs_aarch64_dmb(oshst)
+#define ucs_memory_bus_cacheline_wc_flush()     ucs_aarch64_dsb(st)
 #endif
 
 #define ucs_memory_cpu_fence()        ucs_aarch64_dmb(ish)
-#define ucs_memory_cpu_store_fence()  ucs_aarch64_dmb(ishst)
+//#define ucs_memory_cpu_store_fence()  ucs_aarch64_dmb(ishst)
+#define ucs_memory_cpu_store_fence()  ucs_aarch64_dsb(st)
 #define ucs_memory_cpu_load_fence()   ucs_aarch64_dmb(ishld)
 
 /* The macro is used to serialize stores to Normal NC or Device memory

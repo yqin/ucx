@@ -504,13 +504,13 @@ uct_ib_mlx5_post_send(uct_ib_mlx5_txwq_t *wq, struct mlx5_wqe_ctrl_seg *ctrl,
     uct_ib_mlx5_txwq_validate(wq, num_bb, hw_ci_updated);
 
     /* TODO Put memory store fence here too, to prevent WC being flushed after DBrec */
-    ucs_memory_cpu_store_fence();
+    ucs_memory_cpu_store_fence(); // asm volatile ("dmb ishst" ::: "memory");
 
     /* Write doorbell record */
     *wq->dbrec = htonl(sw_pi += num_bb);
 
     /* Make sure that doorbell record is written before ringing the doorbell */
-    ucs_memory_bus_store_fence();
+    ucs_memory_bus_store_fence(); // asm volatile ("dmb oshst" ::: "memory");
 
     /* Set up copy pointers */
     dst = wq->reg->addr.ptr;
@@ -520,7 +520,7 @@ uct_ib_mlx5_post_send(uct_ib_mlx5_txwq_t *wq, struct mlx5_wqe_ctrl_seg *ctrl,
     ucs_assert(num_bb <= UCT_IB_MLX5_MAX_BB);
     if (ucs_likely(wq->reg->mode == UCT_IB_MLX5_MMIO_MODE_BF_POST)) {
         src = uct_ib_mlx5_bf_copy(dst, src, num_bb, wq);
-        ucs_memory_bus_cacheline_wc_flush();
+        ucs_memory_bus_cacheline_wc_flush(); // asm volatile ("dmb oshst" ::: "memory");
     } else if (wq->reg->mode == UCT_IB_MLX5_MMIO_MODE_BF_POST_MT) {
         src = uct_ib_mlx5_bf_copy(dst, src, num_bb, wq);
         /* Make sure that HW observes WC writes in order, in case of multiple
