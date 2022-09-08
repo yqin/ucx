@@ -848,6 +848,25 @@ static void ucp_perf_worker_progress(void *arg)
     }
 }
 
+static void
+ucp_perf_progress_reqs(ucx_perf_context_t *perf, ucs_status_ptr_t **reqs,
+                       unsigned reqs_num)
+{
+    ucs_status_t status;
+    unsigned i;
+
+    while (reqs_num != 0) {
+        ucp_perf_worker_progress(perf);
+        for (i = 0; i < reqs_num; ++i) {
+            status = ucp_request_check_status(reqs[i]);
+            if (status != UCS_INPROGRESS) {
+                ucp_request_release(reqs[i]);
+                reqs[i] = reqs[--reqs_num];
+            }
+        }
+    }
+}
+
 static ucs_status_t ucp_perf_test_fill_params(ucx_perf_params_t *params,
                                               ucp_params_t *ucp_params)
 {
@@ -898,6 +917,10 @@ static ucs_status_t ucp_perf_test_fill_params(ucx_perf_params_t *params,
         ucp_params->features |= UCP_FEATURE_WAKEUP;
     }
 
+    if (params->ucp.daemon_addrs_num > 0) {
+        ucp_params->features |= UCP_FEATURE_AM;
+    }
+
     status = ucx_perf_test_check_params(params);
     if (status != UCS_OK) {
         return status;
@@ -906,43 +929,48 @@ static ucs_status_t ucp_perf_test_fill_params(ucx_perf_params_t *params,
     return UCS_OK;
 }
 
-static void ucp_perf_test_destroy_eps(ucx_perf_context_t* perf)
+static void ucp_perf_test_destroy_rkeys(ucx_perf_context_t *perf)
 {
     unsigned i, thread_count = perf->params.thread_count;
-    unsigned num_in_prog     = 0;
-    ucs_status_ptr_t **reqs  = ucs_alloca(thread_count * sizeof(*reqs));
-    ucs_status_ptr_t *req;
-    ucs_status_t status;
 
     for (i = 0; i < thread_count; ++i) {
         if (perf->ucp.tctx[i].perf.ucp.rkey != NULL) {
             ucp_rkey_destroy(perf->ucp.tctx[i].perf.ucp.rkey);
         }
+    }
+}
 
-        if (perf->ucp.tctx[i].perf.ucp.ep != NULL) {
-            req = ucp_ep_close_nb(perf->ucp.tctx[i].perf.ucp.ep,
-                                  UCP_EP_CLOSE_MODE_FLUSH);
+static void ucp_perf_test_destroy_eps(ucx_perf_context_t *perf,
+                                      int daemon_eps)
+{
+    unsigned i, thread_count = perf->params.thread_count;
+    unsigned num_in_prog     = 0;
+    ucs_status_ptr_t **reqs  = ucs_alloca(thread_count * sizeof(*reqs));
+    ucs_status_ptr_t *req;
+    ucp_ep_h ep;
 
-            if (UCS_PTR_IS_PTR(req)) {
-                reqs[num_in_prog++] = req;
-            } else if (UCS_PTR_STATUS(req) != UCS_OK) {
-                ucs_warn("failed to close ep %p on thread %d: %s\n",
-                         perf->ucp.tctx[i].perf.ucp.ep, i,
-                         ucs_status_string(UCS_PTR_STATUS(req)));
-            }
+    for (i = 0; i < thread_count; ++i) {
+        if (daemon_eps) {
+            ep = perf->ucp.tctx[i].perf.ucp.daemon_ep;
+        } else {
+            ep = perf->ucp.tctx[i].perf.ucp.ep;
+        }
+
+        if (ep == NULL) {
+            continue;
+        }
+
+        req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
+        if (UCS_PTR_IS_PTR(req)) {
+            reqs[num_in_prog++] = req;
+        } else if (UCS_PTR_STATUS(req) != UCS_OK) {
+            ucs_warn("failed to close ep %p on thread %d: %s\n",
+                     perf->ucp.tctx[i].perf.ucp.ep, i,
+                     ucs_status_string(UCS_PTR_STATUS(req)));
         }
     }
 
-    while (num_in_prog != 0) {
-        ucp_perf_worker_progress(perf);
-        for (i = 0; i < num_in_prog; ++i) {
-            status = ucp_request_check_status(reqs[i]);
-            if (status != UCS_INPROGRESS) {
-                ucp_request_release(reqs[i]);
-                reqs[i] = reqs[--num_in_prog];
-            }
-        }
-    }
+    ucp_perf_progress_reqs(perf, reqs, num_in_prog);
 }
 
 static ucs_status_t
@@ -1085,13 +1113,13 @@ static ucs_status_t ucp_perf_test_receive_remote_data(ucx_perf_context_t *perf,
             if (perf->params.flags & UCX_PERF_TEST_FLAG_VERBOSE) {
                 ucs_error("ucp_ep_create() failed: %s", ucs_status_string(status));
             }
-            goto err_free_eps_buffer;
+            goto err_destroy_eps_and_rkeys;
         }
 
         status = ucp_perf_test_rkey_unpack(&perf->ucp.tctx[i], &perf->params,
                                            rkey_buffer, remote_info->rkey_size);
         if (status != UCS_OK) {
-            goto err_free_eps_buffer;
+            goto err_destroy_eps_and_rkeys;
         }
 
         remote_info = UCS_PTR_BYTE_OFFSET(remote_info,
@@ -1101,8 +1129,9 @@ static ucs_status_t ucp_perf_test_receive_remote_data(ucx_perf_context_t *perf,
     free(buffer);
     return UCS_OK;
 
-err_free_eps_buffer:
-    ucp_perf_test_destroy_eps(perf);
+err_destroy_eps_and_rkeys:
+    ucp_perf_test_destroy_rkeys(perf);
+    ucp_perf_test_destroy_eps(perf, 0);
     free(buffer);
 err:
     return status;
@@ -1294,14 +1323,22 @@ static ucs_status_t ucp_perf_test_setup_endpoints(ucx_perf_context_t *perf,
     /* sync status across all processes */
     status = ucx_perf_test_exchange_status(perf, UCS_OK);
     if (status != UCS_OK) {
-        goto err_destroy_eps;
+        goto err_destroy_eps_and_rkeys;
+    }
+
+    status = ucp_perf_setup_daemon_endpoints(perf);
+    if (status != UCS_OK) {
+        goto err_destroy_daemon_eps;
     }
 
     /* force wireup completion */
     return ucp_perf_test_flush_workers(perf);
 
-err_destroy_eps:
-    ucp_perf_test_destroy_eps(perf);
+err_destroy_daemon_eps:
+    ucp_perf_test_destroy_eps(perf, 1);
+err_destroy_eps_and_rkeys:
+    ucp_perf_test_destroy_rkeys(perf);
+    ucp_perf_test_destroy_eps(perf, 0);
 err:
     (void)ucx_perf_test_exchange_status(perf, status);
     return status;
@@ -1310,7 +1347,9 @@ err:
 static void ucp_perf_test_cleanup_endpoints(ucx_perf_context_t *perf)
 {
     ucp_perf_barrier(perf);
-    ucp_perf_test_destroy_eps(perf);
+    ucp_perf_test_destroy_rkeys(perf);
+    ucp_perf_test_destroy_eps(perf, 0);
+    ucp_perf_test_destroy_eps(perf, 1);
 }
 
 static void
@@ -1797,6 +1836,7 @@ ucs_status_t ucx_perf_run(const ucx_perf_params_t *params,
         if (params->api == UCX_PERF_API_UCP) {
             perf->ucp.worker      = perf->ucp.tctx[0].perf.ucp.worker;
             perf->ucp.ep          = perf->ucp.tctx[0].perf.ucp.ep;
+            perf->ucp.daemon_ep   = perf->ucp.tctx[0].perf.ucp.daemon_ep;
             perf->ucp.remote_addr = perf->ucp.tctx[0].perf.ucp.remote_addr;
             perf->ucp.rkey        = perf->ucp.tctx[0].perf.ucp.rkey;
         }
