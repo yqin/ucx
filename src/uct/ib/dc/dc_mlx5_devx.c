@@ -81,7 +81,8 @@ ucs_status_t uct_dc_mlx5_iface_devx_create_dct(uct_dc_mlx5_iface_t *iface)
 
     iface->rx.dct.devx.obj = uct_ib_mlx5_devx_obj_create(dev->ibv_context, in,
                                                          sizeof(in), out,
-                                                         sizeof(out), "DCT");
+                                                         sizeof(out), "DCT",
+                                                         UCS_LOG_LEVEL_ERROR);
     if (iface->rx.dct.devx.obj == NULL) {
         return UCS_ERR_INVALID_PARAM;
     }

@@ -795,7 +795,7 @@ ucs_status_t uct_ib_mlx5_devx_obj_modify(struct mlx5dv_devx_obj *obj,
 struct mlx5dv_devx_obj *
 uct_ib_mlx5_devx_obj_create(struct ibv_context *context, const void *in,
                             size_t inlen, void *out, size_t outlen,
-                            char *msg_arg);
+                            char *msg_arg, ucs_log_level_t log_level);
 
 ucs_status_t
 uct_ib_mlx5_devx_obj_destroy(struct mlx5dv_devx_obj *obj, char *msg_arg);

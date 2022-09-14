@@ -783,6 +783,7 @@ ucs_status_t uct_ib_device_query(uct_ib_device_t *dev,
         }
     }
 
+    dev->guid  = IBV_DEV_ATTR(dev, sys_image_guid);
     sysfs_path = uct_ib_device_get_sysfs_path(dev->ibv_context->device,
                                               path_buffer);
     uct_ib_device_set_sys_dev(dev, sysfs_path);
