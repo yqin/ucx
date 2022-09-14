@@ -252,7 +252,7 @@ double uct_md_rcache_overhead(const uct_md_rcache_config_t *rcache_config);
 
 extern ucs_config_field_t uct_md_config_table[];
 
-static inline ucs_log_level_t uct_md_reg_log_lvl(uint64_t flags)
+static UCS_F_ALWAYS_INLINE ucs_log_level_t uct_md_reg_log_lvl(uint64_t flags)
 {
     return (flags & UCT_MD_MEM_FLAG_HIDE_ERRORS) ? UCS_LOG_LEVEL_DIAG :
            UCS_LOG_LEVEL_ERROR;
