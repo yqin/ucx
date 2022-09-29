@@ -34,7 +34,7 @@ ucp_memh_rcache_print(ucp_mem_h memh, void *address, size_t length)
 static UCS_F_ALWAYS_INLINE ucs_status_t
 ucp_memh_get(ucp_context_h context, void *address, size_t length,
              ucs_memory_type_t mem_type, ucp_md_map_t reg_md_map,
-             unsigned uct_flags, ucp_mem_h *memh_p)
+             unsigned uct_flags, uint8_t memh_flags, ucp_mem_h *memh_p)
 {
     ucs_rcache_region_t *rregion;
     ucp_mem_h memh;

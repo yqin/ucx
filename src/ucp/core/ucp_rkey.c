@@ -53,6 +53,10 @@ const ucp_rma_proto_t *ucp_rma_proto_list[] = {
 };
 
 
+/* Storage for a default value returned from  */
+uint64_t memh_serialize_default_val = 0;
+
+
 size_t ucp_rkey_packed_size(ucp_context_h context, ucp_md_map_t md_map,
                             ucs_sys_device_t sys_dev,
                             ucp_sys_dev_map_t sys_dev_map)
@@ -610,6 +614,261 @@ int ucp_memh_buffer_is_dummy(const void *exported_memh_buffer)
 {
     return memcmp(exported_memh_buffer, &ucp_memh_dummy_buffer,
                   sizeof(ucp_memh_dummy_buffer)) == 0;
+}
+
+static size_t ucp_memh_common_packed_size()
+{
+    size_t size;
+
+    /* Size of mkey information which comes prior TL mkey data of all MDs */
+    size = sizeof(uint16_t);
+
+    /* Flags */
+    size += sizeof(uint64_t);
+
+    /* Memory domains map */
+    size += sizeof(ucp_md_map_t);
+
+    /* Memory type */
+    size += sizeof(uint8_t);
+
+    return size;
+}
+
+static void* ucp_memh_common_pack(const ucp_mem_h memh, void *buffer,
+                                  uint64_t flags, uint16_t **memh_info_size_p)
+{
+    ucp_context_h UCS_V_UNUSED context = memh->context;
+    void *p                            = buffer;
+
+    /* Check that md_map is valid */
+    ucs_assert(ucs_test_all_flags(UCS_MASK(context->num_mds), memh->md_map));
+
+    /* Size of mkey information which comes prior TL mkey data of all MDs */
+    *memh_info_size_p                 = p;
+    *ucs_serialize_next(&p, uint16_t) = ucp_memh_common_packed_size();
+
+    /* Flags */
+    *ucs_serialize_next(&p, uint64_t) = flags;
+
+    /* Memory domains map */
+    *ucs_serialize_next(&p, ucp_md_map_t) =
+            context->export_md_map[memh->mem_type];
+
+    /* Memory type */
+    UCS_STATIC_ASSERT(UCS_MEMORY_TYPE_LAST <= 255);
+    *ucs_serialize_next(&p, uint8_t) = memh->mem_type;
+
+    return p;
+}
+
+size_t ucp_memh_global_id_packed_size(uct_md_attr_v2_t *md_attr)
+{
+    size_t size = UCT_MD_GLOBAL_ID_MAX;
+
+    while ((size != 0) && (md_attr->global_id[size - 1] == '\0')) {
+        --size;
+    }
+
+    ucs_assert(size < UCT_MD_GLOBAL_ID_MAX);
+    return size;
+}
+
+static size_t
+ucp_memh_exported_packed_size(ucp_context_h context, ucp_md_map_t md_map)
+{
+    size_t size = ucp_memh_common_packed_size();
+    uct_md_attr_v2_t *md_attr;
+    ucp_md_index_t md_index;
+
+    /* Address */
+    size += sizeof(uint64_t);
+
+    /* Length */
+    size += sizeof(uint64_t);
+
+    /* UCP uuid */
+    size += sizeof(uint64_t);
+
+    /* Registration ID */
+    size += sizeof(uint64_t);
+
+    ucs_for_each_bit(md_index, md_map) {
+        md_attr = &context->tl_mds[md_index].attr;
+
+        /* Size of packed TL mkey data */
+        size += sizeof(uint16_t);
+
+        /* TL mkey size */
+        size += sizeof(uint8_t);
+
+        /* TL mkey */
+        size += md_attr->exported_mkey_packed_size;
+
+        /* Size of component name */
+        size += sizeof(uint8_t);
+
+        /* Component name */
+        size += strlen(md_attr->component_name);
+
+        /* Size of global MD identifier */
+        size += sizeof(uint8_t);
+
+        /* Global MD identifier */
+        size += ucp_memh_global_id_packed_size(md_attr);
+    }
+
+    return size;
+}
+
+static ssize_t
+ucp_memh_exported_pack(const ucp_mem_h memh, void *buffer)
+{
+    ucp_context_h context            = memh->context;
+    uint64_t address                 = (uint64_t)ucp_memh_address(memh);
+    uint64_t length                  = ucp_memh_length(memh);
+    uct_mem_h *uct_memhs             = memh->uct;
+    void *p                          = buffer;
+    ucp_tl_md_t *tl_mds              = context->tl_mds;
+    uct_md_mkey_pack_params_t params = {
+        .field_mask = UCT_MD_MKEY_PACK_FIELD_FLAGS,
+        .flags      = UCT_MD_MKEY_PACK_FLAG_EXPORT
+    };
+    uct_md_attr_v2_t *md_attr;
+    void *md_data_p, *common_memh_info_p;
+    uint16_t *memh_info_size_p;
+    char UCS_V_UNUSED buf[128];
+    ucs_status_t status;
+    ssize_t result;
+    ucp_md_index_t md_index;
+    unsigned uct_memh_index;
+    size_t tl_mkey_size, component_name_size, global_id_size;
+    void *tl_mkey_buf, *component_name_buf, *global_id_buf;
+    size_t tl_mkey_data_size;
+
+    ucs_log_indent(1);
+
+    p                  = ucp_memh_common_pack(memh, p,
+                                              UCP_MEMH_BUFFER_FLAG_EXPORTED,
+                                              &memh_info_size_p);
+    common_memh_info_p = p;
+
+    /* Address */
+    *ucs_serialize_next(&p, uint64_t) = address;
+
+    /* Length */
+    *ucs_serialize_next(&p, uint64_t) = length;
+
+    /* UCP uuid */
+    *ucs_serialize_next(&p, uint64_t) = context->uuid;
+
+    /* Registration ID */
+    *ucs_serialize_next(&p, uint64_t) = memh->reg_id;
+
+    /* Store the size of an exported memh information */
+    *memh_info_size_p += UCS_PTR_BYTE_DIFF(common_memh_info_p, p);
+
+    uct_memh_index = 0;
+    ucs_for_each_bit(md_index, context->export_md_map[memh->mem_type]) {
+        md_attr = &tl_mds[md_index].attr;
+
+        /* Save pointer to the begging of the TL mkey data to fill later by the
+         * resulted size of TL mkey data */
+        md_data_p                         = p;
+        *ucs_serialize_next(&p, uint16_t) = 0;
+
+        /* TL mkey size */
+        tl_mkey_size = md_attr->exported_mkey_packed_size;
+        ucs_assertv((tl_mkey_size <= UINT8_MAX) && (tl_mkey_size != 0),
+                    "tl_mkey_size %zu", tl_mkey_size);
+        *ucs_serialize_next(&p, uint8_t) = tl_mkey_size;
+
+        /* TL mkey */
+        tl_mkey_buf = ucs_serialize_next_raw(&p, void, tl_mkey_size);
+        status      = uct_md_mkey_pack_v2(tl_mds[md_index].md,
+                                          uct_memhs[md_index], &params,
+                                          tl_mkey_buf);
+        if (status != UCS_OK) {
+            result = status;
+            goto out;
+        }
+
+        /* Size of component name */
+        component_name_size              = strlen(md_attr->component_name);
+        *ucs_serialize_next(&p, uint8_t) = component_name_size;
+
+        /* Component name */
+        component_name_buf = ucs_serialize_next_raw(&p, void,
+                                                    component_name_size);
+        memcpy(component_name_buf, md_attr->component_name,
+               component_name_size);
+
+        /* Size of global MD identifier */
+        global_id_size                   =
+                ucp_memh_global_id_packed_size(md_attr);
+        *ucs_serialize_next(&p, uint8_t) = global_id_size;
+
+        /* Global MD identifier */
+        global_id_buf = ucs_serialize_next_raw(&p, void, global_id_size);
+        memcpy(global_id_buf, md_attr->global_id, global_id_size);
+
+        /* Size of TL mkey data */
+        tl_mkey_data_size = UCS_PTR_BYTE_DIFF(md_data_p, p);
+        ucs_assertv((tl_mkey_data_size <= UINT16_MAX) &&
+                    (tl_mkey_data_size != 0),
+                    "tl_mkey_data_size %zu", tl_mkey_data_size);
+        *(uint16_t*)md_data_p = tl_mkey_data_size;
+
+        ucs_trace("exported mkey[%d]=%s for md[%d]=%s", uct_memh_index,
+                  ucs_str_dump_hex(p, tl_mkey_size, buf, sizeof(buf),
+                                   SIZE_MAX),
+                  md_index, tl_mds[md_index].rsc.md_name);
+        ++uct_memh_index;
+    }
+
+    result = UCS_PTR_BYTE_DIFF(buffer, p);
+
+out:
+    ucs_log_indent(-1);
+    return result;
+}
+
+static size_t
+ucp_memh_packed_size(ucp_mem_h memh, uint64_t flags, int rkey_compat)
+{
+    ucp_context_h context = memh->context;
+
+    if (flags & UCP_MEMH_PACK_FLAG_EXPORT) {
+        ucs_assert(!rkey_compat);
+        return ucp_memh_exported_packed_size(
+                context, context->export_md_map[memh->mem_type]);
+    }
+
+    if (rkey_compat) {
+        return ucp_rkey_packed_size(context, memh->md_map,
+                                    UCS_SYS_DEVICE_ID_UNKNOWN, 0);
+    }
+
+    ucs_fatal("packing rkey using ucp_memh_pack() is unsupported");
+}
+
+static ssize_t ucp_memh_do_pack(ucp_mem_h memh, uint64_t flags,
+                                int rkey_compat, void *memh_buffer)
+{
+    ucp_memory_info_t mem_info;
+
+    if (flags & UCP_MEMH_PACK_FLAG_EXPORT) {
+        return ucp_memh_exported_pack(memh, memh_buffer);
+    }
+
+    if (rkey_compat) {
+        mem_info.type    = memh->mem_type;
+        mem_info.sys_dev = UCS_SYS_DEVICE_ID_UNKNOWN;
+        return ucp_rkey_pack_memh(memh->context, memh->md_map, memh, &mem_info,
+                                  0, NULL, memh_buffer);
+    }
+
+    ucs_fatal("packing rkey using ucp_memh_pack() is unsupported");
 }
 
 static ucs_status_t

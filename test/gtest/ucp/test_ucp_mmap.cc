@@ -84,6 +84,45 @@ public:
         ASSERT_UCS_OK(status);
     }
 
+    void create_entity_no_rcache() {
+        modify_config("RCACHE_ENABLE", "n");
+        ucs::scoped_setenv ib_reg_methods_env("UCX_IB_REG_METHODS", "direct");
+        ucs::scoped_setenv knem_rcache_env("UCX_KNEM_RCACHE", "no");
+        create_entity();
+    }
+
+    void always_equal_md_map_init() {
+        ucs_status_t status;
+        ucp_mem_h memh1, memh2;
+        char dummy[2 * ucs_get_page_size()];
+
+        ucp_mem_map_params_t params;
+        params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                            UCP_MEM_MAP_PARAM_FIELD_LENGTH;
+        params.length     = sizeof(char);
+        
+        params.address = &dummy[0];
+        status         = ucp_mem_map(sender().ucph(), &params, &memh1);
+        ASSERT_UCS_OK(status);
+
+        params.address = &dummy[2 * ucs_get_page_size() - 1];
+        status         = ucp_mem_map(sender().ucph(), &params, &memh2);
+        ASSERT_UCS_OK(status);
+
+        EXPECT_EQ(memh1->md_map, memh2->md_map);
+        ucp_md_index_t md_index;
+
+        m_always_equal_md_map = 0;
+        ucs_for_each_bit(md_index, memh1->md_map) {
+            if (memh1->uct[md_index] == memh2->uct[md_index]) {
+                m_always_equal_md_map |= UCS_BIT(md_index);
+            }
+        }
+
+        ucp_mem_unmap(sender().ucph(), memh1);
+        ucp_mem_unmap(sender().ucph(), memh2);
+    }
+
     virtual void init() {
         ucs::skip_on_address_sanitizer();
         if (disable_proto()) {
@@ -110,7 +149,7 @@ public:
     }
 
     unsigned mem_map_flags() const {
-        return (get_variant_value() == VARIANT_MAP_NONBLOCK) ?
+        return (get_variant_value() & VARIANT_MAP_NONBLOCK) ?
                        UCP_MEM_MAP_NONBLOCK :
                        0;
     }
