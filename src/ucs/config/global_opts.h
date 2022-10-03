@@ -147,6 +147,11 @@ typedef struct {
        values. */
     size_t                     rcache_stat_min;
     size_t                     rcache_stat_max;
+
+    /* Extra latency in nano-seconds to add to post_send() */
+    unsigned long              extra_latency;
+    /* Extra latency scaling on a particular system */
+    int                        extra_latency_scaling;
 } ucs_global_opts_t;
 
 
