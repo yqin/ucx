@@ -537,6 +537,13 @@ uct_ib_mlx5_post_send(uct_ib_mlx5_txwq_t *wq, struct mlx5_wqe_ctrl_seg *ctrl,
     uint16_t sw_pi, num_bb, res_count;
     void *src, *dst;
 
+    /* add extra latency */
+    volatile int loop_count = ucs_global_opts.extra_latency *
+                              ucs_global_opts.extra_latency_scaling;
+    int i;
+    for (i = 0; i < loop_count; i++) {
+    }
+
     ucs_assert(((unsigned long)ctrl % UCT_IB_MLX5_WQE_SEG_SIZE) == 0);
     num_bb  = ucs_div_round_up(wqe_size, MLX5_SEND_WQE_BB);
     sw_pi   = wq->sw_pi;

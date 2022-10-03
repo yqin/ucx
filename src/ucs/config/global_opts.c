@@ -57,7 +57,9 @@ ucs_global_opts_t ucs_global_opts = {
     .modules               = { {NULL, 0}, UCS_CONFIG_ALLOW_LIST_ALLOW_ALL },
     .arch                  = UCS_ARCH_GLOBAL_OPTS_INITALIZER,
     .rcache_stat_min       = 0,
-    .rcache_stat_max       = 0
+    .rcache_stat_max       = 0,
+    .extra_latency         = 0,
+    .extra_latency_scaling = 4
 };
 
 static const char *ucs_handle_error_modes[] = {
@@ -190,6 +192,14 @@ static ucs_config_field_t ucs_global_opts_table[] = {
   "Comma-separated list of methods of detecting system topology.\n"
   "The list order decides the priority of methods used.",
   ucs_offsetof(ucs_global_opts_t, topo_prio), UCS_CONFIG_TYPE_STRING_ARRAY},
+
+ {"EXTRA_LATENCY", "0",
+  "Extra latency in nano-seconds to add to post_send().",
+  ucs_offsetof(ucs_global_opts_t, extra_latency), UCS_CONFIG_TYPE_ULONG},
+
+ {"EXTRA_LATENCY_SCALING", "4",
+  "Extra latency scaling in cycles per nano-second to add to post_send().",
+  ucs_offsetof(ucs_global_opts_t, extra_latency_scaling), UCS_CONFIG_TYPE_INT},
 
  {NULL}
 };
