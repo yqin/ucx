@@ -552,6 +552,7 @@ ucp_memh_init_uct_reg(ucp_context_h context, ucp_mem_h memh, unsigned uct_flags)
             memh->md_map       |= UCS_BIT(md_index);
             reg_md_map         &= ~UCS_BIT(md_index);
         }
+        memh->reg_id = memh->parent->reg_id;
 
         status = ucp_memh_register(context, memh, reg_md_map, address, length,
                                    uct_flags);
