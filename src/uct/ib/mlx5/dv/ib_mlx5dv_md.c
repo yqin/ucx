@@ -1711,7 +1711,7 @@ uct_ib_mlx5_devx_reg_exported_key(uct_ib_md_t *ib_md, uct_ib_mem_t *ib_memh)
     umem_in.addr        = address;
     umem_in.size        = length;
     umem_in.access      = UCT_IB_MLX5_MD_UMEM_ACCESS;
-    umem_in.pgsz_bitmap = UCS_BIT(12);
+    umem_in.pgsz_bitmap = ucs_get_page_size();
     umem_in.comp_mask   = 0;
 
     ucs_assert(memh->umem == NULL);
