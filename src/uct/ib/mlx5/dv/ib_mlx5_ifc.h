@@ -97,6 +97,11 @@ enum {
     UCT_IB_MLX5_CAP_2_GENERAL = 0x20,
 };
 
+enum {
+    UCT_IB_MLX5_HCA_CAPS_2_ALLOWED_OBJ_FOR_OTHER_VHCA_ACCESS_MKEY = 0x4,
+    UCT_IB_MLX5_HCA_CAPS_2_CROSS_VHCA_OBJ_TO_OBJ_LOCAL_MKEY_TO_REMOTE_MKEY = 0x100
+};
+
 struct uct_ib_mlx5_cmd_hca_cap_bits {
     uint8_t    reserved_at_0[0x30];
     uint8_t    vhca_id[0x10];
