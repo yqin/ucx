@@ -818,6 +818,8 @@ uct_ib_md_mem_attach(uct_md_h uct_md, const void *mkey_buffer,
     const uint64_t *mkey = (const uint64_t*)mkey_buffer;
     uint64_t flags       = UCT_MD_MEM_ATTACH_FIELD_VALUE(params, flags,
                                                          FIELD_FLAGS, 0);
+    uint64_t address     = UCT_MD_MEM_ATTACH_FIELD_VALUE(params, address,
+                                                         FIELD_ADDRESS, 0);
     uct_ib_md_t *md      = ucs_derived_of(uct_md, uct_ib_md_t);
     uct_ib_mem_t *ib_memh;
     ucs_status_t status;
@@ -839,7 +841,9 @@ uct_ib_md_mem_attach(uct_md_h uct_md, const void *mkey_buffer,
     uct_ib_mem_init(ib_memh, UCT_IB_MEM_FLAG_NO_RCACHE);
 
     status = md->ops->import_exported_key(md, flags, uct_ib_md_vhca_id(*mkey),
-                                          uct_ib_md_lkey(*mkey), ib_memh);
+                                          uct_ib_md_lkey_flags(*mkey),
+                                          uct_ib_md_lkey(*mkey), address,
+                                          ib_memh);
     if (status != UCS_OK) {
         goto out_memh_free;
     }
@@ -922,6 +926,28 @@ uct_ib_mem_advise(uct_md_h uct_md, uct_mem_h memh, void *addr,
 }
 
 static ucs_status_t
+uct_ib_mkey_pack_address(uct_md_h uct_md, uct_mem_h uct_memh,
+                         const uct_md_mkey_pack_params_t *params, void *buffer)
+{
+    uct_ib_mem_t *memh = uct_memh;
+    uint64_t *address_p = (uint64_t *)buffer;
+    *address_p = memh->address;
+
+    return UCS_OK;
+}
+
+static ucs_status_t
+uct_ib_mkey_pack_flags(uct_md_h uct_md, uct_mem_h uct_memh,
+                 const uct_md_mkey_pack_params_t *params, void *buffer)
+{
+    uct_ib_mem_t *memh = uct_memh;
+    uint32_t *flags_p = (uint32_t *)buffer;
+    *flags_p = memh->flags;
+
+    return UCS_OK;
+}
+
+static ucs_status_t
 uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
                  const uct_md_mkey_pack_params_t *params,
                  void *mkey_buffer)
@@ -932,6 +958,7 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
                                          FLAGS, 0);
     uint32_t atomic_rkey;
     uint32_t mkey;
+    uint32_t mkey_flags = 0;
     ucs_status_t status;
 
     /* create umr only if a user requested atomic access to the
@@ -973,7 +1000,8 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
             }
         }
 
-        mkey = memh->exported_lkey;
+        mkey       = memh->exported_lkey;
+        mkey_flags = memh->flags;
     } else if ((flags & UCT_MD_MKEY_PACK_FLAG_INVALIDATE) &&
                ((atomic_rkey != UCT_IB_INVALID_MKEY) ||
                 !(memh->flags & UCT_IB_MEM_ACCESS_REMOTE_ATOMIC))) {
@@ -994,10 +1022,14 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
     }
 
     if (flags & UCT_MD_MKEY_PACK_FLAG_EXPORT) {
-        uct_ib_md_pack_exported_mkey(mkey, md->vhca_id, mkey_buffer);
+        /* TODO: should we also pack mkey_flags separately like below? */
+        ucs_print("packing exported mkey 0x%x flags 0x%x vhca_id %d", mkey,
+                  mkey_flags, md->vhca_id);
+        uct_ib_md_pack_exported_mkey(mkey, mkey_flags, md->vhca_id, mkey_buffer);
     } else {
         uct_ib_md_pack_rkey(mkey, atomic_rkey, mkey_buffer);
     }
+
     return UCS_OK;
 }
 
@@ -1023,6 +1055,8 @@ static uct_md_ops_t uct_ib_md_ops = {
     .mem_attach         = uct_ib_md_mem_attach,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
+    .mkey_pack_address  = uct_ib_mkey_pack_address,
+    .mkey_pack_flags    = uct_ib_mkey_pack_flags,
     .detect_memory_type = ucs_empty_function_return_unsupported,
 };
 
@@ -1102,6 +1136,8 @@ static uct_md_ops_t uct_ib_md_rcache_ops = {
     .mem_attach             = uct_ib_md_mem_attach,
     .mem_advise             = uct_ib_mem_advise,
     .mkey_pack              = uct_ib_mkey_pack,
+    .mkey_pack_address      = uct_ib_mkey_pack_address,
+    .mkey_pack_flags        = uct_ib_mkey_pack_flags,
     .is_sockaddr_accessible = ucs_empty_function_return_zero_int,
     .detect_memory_type     = ucs_empty_function_return_unsupported,
 };
@@ -1222,6 +1258,8 @@ static uct_md_ops_t UCS_V_UNUSED uct_ib_md_global_odp_ops = {
     .mem_attach         = uct_ib_md_mem_attach,
     .mem_advise         = uct_ib_mem_advise,
     .mkey_pack          = uct_ib_mkey_pack,
+    .mkey_pack_address  = uct_ib_mkey_pack_address,
+    .mkey_pack_flags    = uct_ib_mkey_pack_flags,
     .detect_memory_type = ucs_empty_function_return_unsupported,
 };
 

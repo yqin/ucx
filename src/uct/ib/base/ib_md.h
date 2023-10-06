@@ -59,8 +59,10 @@ enum {
     UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4), /**< The memory region will issue
                                                         PCIe writes with relaxed order
                                                         attribute */
-    UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(5)  /**< Memory handle wasn't stored
+    UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(5), /**< Memory handle wasn't stored
                                                         in RCACHE */
+    UCT_IB_MEM_FLAG_INDIRECT_XGVMI   = UCS_BIT(6)  /**< Memory handle contains the
+                                                        indirect xgvmi mkey */
 };
 
 enum {
@@ -78,7 +80,7 @@ typedef struct uct_ib_md_ext_config {
     int                      prefer_nearest_device; /**< Give priority for near
                                                          device */
     int                      enable_indirect_atomic; /** Enable indirect atomic */
-
+    int                      max_inline_klm_list; /* Maximal length of inline KLM list */
     struct {
         ucs_numa_policy_t    numa_policy;  /**< NUMA policy flags for ODP */
         int                  prefetch;     /**< Auto-prefetch non-blocking memory
@@ -99,6 +101,7 @@ typedef struct uct_ib_md_ext_config {
 
 
 typedef struct uct_ib_mem {
+    uint64_t                address;
     uint32_t                lkey;
     uint32_t                exported_lkey;
     uint32_t                rkey;
@@ -374,18 +377,21 @@ typedef ucs_status_t (*uct_ib_md_reg_exported_key_func_t)(
 /**
  * Memory domain method to register crossing mkey for memory area.
  *
- * @param [in]  ib_md          Memory domain.
- * @param [in]  flags          UCT memory attach flags.
- * @param [in]  target_gvmi_id Target GVMI ID.
- * @param [in]  target_mkey    Target mkey this mkey refers to.
- * @param [out] ib_memh        Memory region handle.
- *                             Method should initialize lkey and rkey.
+ * @param [in]  ib_md               Memory domain.
+ * @param [in]  flags               UCT memory attach flags.
+ * @param [in]  target_gvmi_id      Target GVMI ID.
+ * @param [in]  target_mkey_flags   Target mkey's flags.
+ * @param [in]  target_mkey         Target mkey this mkey refers to.
+ * @param [in]  target_address      Target address.
+ * @param [out] ib_memh             Memory region handle.
+ *                                  Method should initialize lkey and rkey.
  *
  * @return UCS_OK on success or error code in case of failure.
  */
 typedef ucs_status_t (*uct_ib_md_import_exported_key_func_t)(
         uct_ib_md_t *ib_md, uint64_t flags, uint32_t target_gvmi_id,
-        uint32_t target_mkey, uct_ib_mem_t *ib_memh);
+        uint32_t target_mkey_flags, uint32_t target_mkey, 
+        uint64_t target_address, uct_ib_mem_t *ib_memh);
 
 
 typedef struct uct_ib_md_ops {
@@ -450,9 +456,14 @@ static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_lkey(uint64_t exported_mkey)
 }
 
 
+static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_lkey_flags(uint64_t exported_mkey)
+{
+    return (uint32_t)((uint16_t)(exported_mkey >> 32));
+}
+
 static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_vhca_id(uint64_t exported_mkey)
 {
-    return exported_mkey >> 32;
+    return (uint32_t)((uint16_t)(exported_mkey >> 48));
 }
 
 
@@ -474,12 +485,19 @@ uct_ib_md_pack_rkey(uint32_t rkey, uint32_t atomic_rkey, void *rkey_buffer)
 
 
 static UCS_F_ALWAYS_INLINE void
-uct_ib_md_pack_exported_mkey(uint32_t lkey, uint32_t vhca_id, void *buffer)
+uct_ib_md_pack_exported_mkey(uint32_t lkey, uint32_t lkey_flags,
+                             uint32_t vhca_id, void *buffer)
 {
     uint64_t *mkey_p = (uint64_t*)buffer;
 
-    *mkey_p = (((uint64_t)vhca_id) << 32) | lkey;
-    ucs_trace("packed exported mkey: lkey 0x%x vhca_id 0x%x", lkey, vhca_id);
+    /* mkey buffer format:
+     *     vhca_id (16 bits) | lkey_flags (16 bits) | lkey (32 bits)
+     */
+    *mkey_p = (((uint64_t)vhca_id) << 48) |
+              (((uint64_t)lkey_flags) << 32) |
+              lkey;
+    ucs_trace("packed exported mkey: lkey 0x%x flags 0x%x vhca_id 0x%x",
+              lkey, lkey_flags, vhca_id);
 }
 
 
@@ -528,6 +546,18 @@ static UCS_F_ALWAYS_INLINE uint32_t uct_ib_memh_get_lkey(uct_mem_h memh)
 {
     ucs_assert(memh != UCT_MEM_HANDLE_NULL);
     return ((uct_ib_mem_t*)memh)->lkey;
+}
+
+static UCS_F_ALWAYS_INLINE uint64_t uct_ib_memh_get_address(uct_mem_h memh)
+{
+    ucs_assert(memh != UCT_MEM_HANDLE_NULL);
+    return ((uct_ib_mem_t*)memh)->address;
+}
+
+static UCS_F_ALWAYS_INLINE uint32_t uct_ib_memh_get_flags(uct_mem_h memh)
+{
+    ucs_assert(memh != UCT_MEM_HANDLE_NULL);
+    return ((uct_ib_mem_t*)memh)->flags;
 }
 
 

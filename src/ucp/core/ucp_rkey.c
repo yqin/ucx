@@ -66,6 +66,8 @@ size_t ucp_rkey_packed_size(ucp_context_h context, ucp_md_map_t md_map,
     size += sizeof(uint8_t); /* Memory type */
 
     ucs_for_each_bit(md_index, md_map) {
+        size += sizeof(uint64_t);   /* address associated with this rkey */
+        size += sizeof(uint32_t);   /* flags associated with this rkey */
         tl_rkey_size = context->tl_mds[md_index].attr.rkey_packed_size;
         ucs_assert_always(tl_rkey_size <= UINT8_MAX);
         size += sizeof(uint8_t) + tl_rkey_size;
@@ -139,13 +141,14 @@ ucp_rkey_pack_common(ucp_context_h context, ucp_md_map_t md_map,
     ucs_sys_device_t sys_dev;
     size_t tl_rkey_size;
     ucs_status_t status;
-    void *tl_rkey_buf;
+    void *tl_rkey_buf, *tl_buf;
     ssize_t result;
+    uct_mem_h uct_memh;
 
     /* Check that md_map is valid */
     ucs_assert(ucs_test_all_flags(UCS_MASK(context->num_mds), md_map));
 
-    ucs_trace("packing rkey type %s md_map 0x%" PRIx64 "dev_map 0x%" PRIx64,
+    ucs_trace("packing rkey type %s md_map 0x%" PRIx64 " dev_map 0x%" PRIx64,
               ucs_memory_type_names[mem_info->type], md_map, sys_dev_map);
     ucs_log_indent(1);
 
@@ -157,15 +160,36 @@ ucp_rkey_pack_common(ucp_context_h context, ucp_md_map_t md_map,
     /* Write both size and rkey_buffer for each UCT rkey */
     uct_memh_index = 0;
     ucs_for_each_bit (md_index, md_map) {
+        params.flags = context->tl_mds[md_index].pack_flags_mask & uct_flags;
+        uct_memh = memh[sparse_memh ? md_index : uct_memh_index];
+
+        /* TODO: pack address and flags only for an IB MD, otherwise pass */
+        /* rkey base address */
+        tl_buf = ucs_serialize_next_raw(&p, void, sizeof(uint64_t));
+        status = uct_md_mkey_pack_address(context->tl_mds[md_index].md,
+                                          uct_memh, &params, tl_buf);
+        if (status != UCS_OK) {
+            result = status;
+            goto out;
+        }
+
+        /* rkey flags */
+        tl_buf = ucs_serialize_next_raw(&p, void, sizeof(uint32_t));
+        status = uct_md_mkey_pack_flags(context->tl_mds[md_index].md, uct_memh,
+                                        &params, tl_buf);
+        if (status != UCS_OK) {
+            result = status;
+            goto out;
+        }
+
+        /* rkey size */
         tl_rkey_size = context->tl_mds[md_index].attr.rkey_packed_size;
         *ucs_serialize_next(&p, uint8_t) = tl_rkey_size;
 
+        /* rkey */
         tl_rkey_buf  = ucs_serialize_next_raw(&p, void, tl_rkey_size);
-        params.flags = context->tl_mds[md_index].pack_flags_mask & uct_flags;
-
-        status = uct_md_mkey_pack_v2(context->tl_mds[md_index].md,
-                                     memh[sparse_memh ? md_index :
-                                     uct_memh_index], &params, tl_rkey_buf);
+        status = uct_md_mkey_pack_v2(context->tl_mds[md_index].md, uct_memh,
+                                     &params, tl_rkey_buf);
         if (status != UCS_OK) {
             result = status;
             goto out;
@@ -353,6 +377,8 @@ ucp_memh_exported_pack(const ucp_mem_h memh, void *buffer)
     size_t tl_mkey_data_size;
 
     ucs_log_indent(1);
+    ucs_trace("packing exported memh %p buffer 0x%"PRIx64" length %ld reg_id %ld",
+              memh, address, length, memh->reg_id);
 
     p                  = ucp_memh_common_pack(memh, p,
                                               UCP_MEMH_BUFFER_FLAG_EXPORTED,
@@ -667,6 +693,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_ep_rkey_unpack_internal,
     ucp_rkey_h rkey;
     uint8_t flags;
     int md_count;
+    uint64_t tl_rkey_address;
+    uint32_t tl_rkey_flags;
 
     UCS_STATIC_ASSERT(ucs_offsetof(ucp_rkey_t, mem_type) ==
                       ucs_offsetof(ucp_rkey_t, cache.mem_type));
@@ -709,8 +737,12 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_ep_rkey_unpack_internal,
     /* Go over remote MD indices and unpack rkey of each UCT MD */
     rkey_index = 0; /* Index of the rkey in the array */
     ucs_for_each_bit(remote_md_index, remote_md_map) {
-        tl_rkey_size = *ucs_serialize_next(&p, const uint8_t);
-        tl_rkey_buf  = ucs_serialize_next_raw(&p, const void, tl_rkey_size);
+        tl_rkey_address = *ucs_serialize_next(&p, const uint64_t);
+        tl_rkey_flags   = *ucs_serialize_next(&p, const uint32_t);
+        tl_rkey_size    = *ucs_serialize_next(&p, const uint8_t);
+        tl_rkey_buf     = ucs_serialize_next_raw(&p, const void, tl_rkey_size);
+        ucs_print("unpacking rkey for address 0x%"PRIx64" flags 0x%x rkey_size %ld",
+                  tl_rkey_address, tl_rkey_flags, tl_rkey_size);
 
         /* Use bit operations to iterate through the indices of the remote MDs
          * as provided in the md_map. md_map always holds a bitmap of MD indices
@@ -735,6 +767,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_ep_rkey_unpack_internal,
         if (status == UCS_OK) {
             ucs_trace("rkey[%d] for remote md %d is 0x%lx", rkey_index,
                       remote_md_index, tl_rkey->rkey.rkey);
+            tl_rkey->rkey.address = tl_rkey_address;
+            tl_rkey->rkey.flags   = tl_rkey_flags;
             ++rkey_index;
         } else if (status == UCS_ERR_UNREACHABLE) {
             rkey->md_map &= ~UCS_BIT(remote_md_index);

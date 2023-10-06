@@ -1645,6 +1645,8 @@ typedef struct uct_rkey_bundle {
     uct_rkey_t               rkey;    /**< Remote key descriptor, passed to RMA functions */
     void                     *handle; /**< Handle, used internally for releasing the key */
     void                     *type;   /**< Remote key type */
+    uint64_t                 address; /**< Base address this rkey is associated with */
+    uint32_t                 flags;   /**< Flags of this rkey */
 } uct_rkey_bundle_t;
 
 

@@ -288,6 +288,12 @@ typedef struct uct_ib_mlx5_md {
     struct ibv_mr            *flush_mr;
     struct mlx5dv_devx_obj   *flush_dvmr;
     uint8_t                  mkey_tag;
+
+    /* special CQ and QP for UMR */
+    struct ibv_cq            *umr_cq;       /* special CQ for UMR */
+    struct ibv_qp            *umr_qp;       /* special QP for UMR */
+    struct ibv_qp_ex         *umr_qpx;      /* QP_EX for UMR */
+    struct mlx5dv_qp_ex      *umr_dv_qpx;   /* MLX5DV_QP_EX for UMR */
 #endif
     struct {
         size_t dc;

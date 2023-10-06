@@ -94,15 +94,20 @@ static ucs_status_t ucp_rma_basic_progress_get(uct_pending_req_t *self)
     } else {
         uct_iov_t iov;
         frag_length = ucs_min(req->send.length, rma_config->max_get_zcopy);
-        iov.buffer  = (void *)req->send.buffer;
+        iov.buffer  = (void *)req->send.buffer; /* local buffer */
         iov.length  = frag_length;
         iov.count   = 1;
-        iov.memh    = req->send.state.dt.dt.contig.memh[0];
+        iov.memh    = req->send.state.dt.dt.contig.memh[0]; /* local memh */
+        /* since we will lose reference to the remote rkey (base and flags) in
+           the case when xgvmi umr mkey is used, we put the reference on iov to
+           pass into uct
+         */
+        iov.scratch = rkey->tl_rkey;
 
         status = UCS_PROFILE_CALL(uct_ep_get_zcopy,
                                   ucp_ep_get_fast_lane(ep, lane), &iov, 1,
-                                  req->send.rma.remote_addr,
-                                  rkey->cache.rma_rkey,
+                                  req->send.rma.remote_addr, /* remote buffer */
+                                  rkey->cache.rma_rkey,      /* remote rkey */
                                   &req->send.state.uct_comp);
     }
 

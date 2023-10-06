@@ -225,7 +225,9 @@ typedef enum {
  */
 typedef enum {
     /** Enables @ref uct_md_mem_attach_params_t.flags field */
-    UCT_MD_MEM_ATTACH_FIELD_FLAGS = UCS_BIT(0)
+    UCT_MD_MEM_ATTACH_FIELD_FLAGS   = UCS_BIT(0),
+    /** Enables @ref uct_md_mem_attach_params_t.address field */
+    UCT_MD_MEM_ATTACH_FIELD_ADDRESS = UCS_BIT(1)
 } uct_md_mem_attach_field_mask_t;
 
 
@@ -446,6 +448,11 @@ typedef struct uct_md_mem_attach_params {
      * @ref uct_md_mem_attach_flags_t.
      */
     uint64_t                     flags;
+
+    /**
+     * Remote address needed to support 0-based indirect xgvmi operation.
+     */
+    uint64_t                     address;
 } uct_md_mem_attach_params_t;
 
 
@@ -744,6 +751,45 @@ typedef struct {
  */
 ucs_status_t uct_md_query_v2(uct_md_h md, uct_md_attr_v2_t *md_attr);
 
+
+/**
+ * @ingroup UCT_MD
+ *
+ * @brief Pack a memory address associated with the key.
+ *
+ * This routine packs a local memory handle registered by @ref uct_md_mem_reg
+ * into a memory buffer, which then could be deserialized by a peer and used in
+ * UCT operations.
+ *
+ * @param [in]  md     Handle to memory domain.
+ * @param [in]  memh   Pack a remote key for this memory handle.
+ * @param [in]  params Operation parameters, see @ref
+ *                     uct_md_mkey_pack_params_t.
+ * @param [out] buffer Pointer to a buffer to hold the packed memory address.
+ * @return             Error code.
+ */
+ucs_status_t uct_md_mkey_pack_address(uct_md_h md, uct_mem_h memh,
+                                      const uct_md_mkey_pack_params_t *params,
+                                      void *buffer);
+
+/**
+ * @ingroup UCT_MD
+ *
+ * @brief Pack flags associated with the key.
+ *
+ * This routine packs a local memory handle registered by @ref uct_md_mem_reg
+ * into a memory buffer, which then could be deserialized by a peer and used in
+ * UCT operations.
+ *
+ * @param [in]  md     Handle to memory domain.
+ * @param [in]  memh   Pack a remote key for this memory handle.
+ * @param [in]  params Operation parameters, see @ref *uct_md_mkey_pack_params_t.
+ * @param [out] buffer Pointer to a buffer to hold the packed memory flags.
+ * @return             Error code.
+ */
+ucs_status_t uct_md_mkey_pack_flags(uct_md_h md, uct_mem_h memh,
+                                    const uct_md_mkey_pack_params_t *params,
+                                    void *buffer);
 
 /**
  * @ingroup UCT_MD
