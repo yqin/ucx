@@ -270,7 +270,7 @@ ucp_tag_offload_do_post(ucp_request_t *req)
     ucp_worker_iface_t *wiface;
     ucs_status_t status;
     ucp_md_index_t mdi;
-    uct_iov_t iov;
+    uct_iov_t iov = {0};
 
     wiface = ucp_tag_offload_iface(worker, req->recv.tag.tag);
     if (ucs_unlikely(wiface == NULL)) {

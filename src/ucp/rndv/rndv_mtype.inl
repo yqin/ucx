@@ -103,7 +103,7 @@ static UCS_F_ALWAYS_INLINE ucs_status_t ucp_proto_rndv_mtype_copy(
     ucp_md_index_t md_index    = ucp_ep_md_index(mtype_ep, lane);
     ucp_mem_desc_t *mdesc      = req->send.rndv.mdesc;
     ucs_status_t status;
-    uct_iov_t iov;
+    uct_iov_t iov = {0};
 
     ucs_assert(mdesc != NULL);
 

@@ -495,7 +495,7 @@ size_t uct_ib_mlx5_set_data_seg_iov(uct_ib_mlx5_txwq_t *txwq,
 
         /* use 0-based address for xgvmi umr lkey */
         lkey_flags = uct_ib_memh_get_flags(iov[iov_it].memh);
-        if (ucs_unlikely(lkey_flags & UCT_IB_MEM_FLAG_INDIRECT_XGVMI)) {
+        if (ucs_unlikely(lkey_flags & UCT_IB_MEM_FLAG_INDIRECT)) {
             lkey_base = uct_ib_memh_get_address(iov[iov_it].memh);
             local_address = (void*)((uint64_t)iov[iov_it].buffer - lkey_base);
         } else {

@@ -566,6 +566,14 @@ static ucs_status_t uct_ib_memh_dereg(uct_ib_md_t *md, uct_ib_mem_t *memh)
         }
     }
 
+    if ((memh->flags & UCT_IB_MEM_FLAG_XGVMI) ||
+        (memh->flags & UCT_IB_MEM_FLAG_XGVMI_ALIAS)) {
+        s = md->ops->destroy_exported_key(md, memh);
+        if (s != UCS_OK) {
+            status = s;
+        }
+    }
+
     s = uct_ib_memh_dereg_key(md, memh, UCT_IB_MR_DEFAULT);
     if (s != UCS_OK) {
         status = s;
@@ -696,6 +704,7 @@ static ucs_status_t uct_ib_mem_set_numa_policy(uct_ib_md_t *md, void *address,
 
 static void uct_ib_mem_init(uct_ib_mem_t *memh, uint32_t flags)
 {
+    memh->address       = 0;
     memh->lkey          = UCT_IB_INVALID_MKEY;
     memh->exported_lkey = UCT_IB_INVALID_MKEY;
     memh->rkey          = UCT_IB_INVALID_MKEY;

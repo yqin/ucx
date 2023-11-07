@@ -870,7 +870,7 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
             rkey_base  = tl_rkey->rkey.address;
             rkey_flags = tl_rkey->rkey.flags;
 
-            if (rkey_flags & UCT_IB_MEM_FLAG_INDIRECT_XGVMI) {
+            if (rkey_flags & UCT_IB_MEM_FLAG_INDIRECT) {
                 remote_addr -= rkey_base;
             }
         }
@@ -1710,7 +1710,7 @@ static ucs_status_t UCS_F_ALWAYS_INLINE uct_rc_mlx5_common_ep_short_dm(
         uint16_t dci_channel, uint64_t rdma_raddr, uct_rkey_t rdma_rkey,
         uct_rc_txqp_t *txqp, uct_ib_mlx5_txwq_t *txwq, size_t av_size)
 {
-    uct_iov_t iov;
+    uct_iov_t iov = {0};
 
     iov.buffer = (void*)payload;
     iov.count  = 1;

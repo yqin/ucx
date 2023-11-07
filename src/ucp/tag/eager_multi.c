@@ -275,6 +275,7 @@ ucp_proto_eager_zcopy_multi_send_func(ucp_request_t *req,
     size_t hdr_size;
     size_t iov_count;
 
+    memset(iov, 0, UCP_MAX_IOV * sizeof(uct_iov_t));
     if (req->send.state.dt_iter.offset == 0) {
         am_id    = UCP_AM_ID_EAGER_FIRST;
         hdr_size = sizeof(hdr.first);

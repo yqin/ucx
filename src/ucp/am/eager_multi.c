@@ -257,6 +257,7 @@ static UCS_F_ALWAYS_INLINE ucs_status_t ucp_am_eager_multi_zcopy_send_func(
 
     UCS_STATIC_ASSERT(sizeof(hdr.first) == sizeof(ucp_am_hdr_t));
     UCS_STATIC_ASSERT(sizeof(hdr.middle) == sizeof(ucp_am_hdr_t));
+    memset(iov, 0, UCP_MAX_IOV * sizeof(uct_iov_t));
 
     if (req->send.state.dt_iter.offset == 0) {
         am_id         = UCP_AM_ID_AM_FIRST;

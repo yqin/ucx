@@ -61,8 +61,10 @@ enum {
                                                         attribute */
     UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(5), /**< Memory handle wasn't stored
                                                         in RCACHE */
-    UCT_IB_MEM_FLAG_INDIRECT_XGVMI   = UCS_BIT(6)  /**< Memory handle contains the
-                                                        indirect xgvmi mkey */
+    UCT_IB_MEM_FLAG_INDIRECT         = UCS_BIT(6), /**< Indirect/UMR mkey (0-based) */
+    UCT_IB_MEM_FLAG_XGVMI            = UCS_BIT(7), /**< Memory handle contains
+                                                        xgvmi mkey */
+    UCT_IB_MEM_FLAG_XGVMI_ALIAS      = UCS_BIT(8)  /**< Alias of the xgvmi mkey */
 };
 
 enum {
@@ -394,20 +396,37 @@ typedef ucs_status_t (*uct_ib_md_import_exported_key_func_t)(
         uint64_t target_address, uct_ib_mem_t *ib_memh);
 
 
+/**
+ * Memory domain method to destroy crossed or crossing mkey for memory area.
+ *
+ * @param [in]  ib_md       Memory domain.
+ * @param [in]  ib_memh     Memory region handle.
+ *                          Method should destroy the exported mkey and put it
+ *                          back to the mkey pool (if needed) on the host, as
+ *                          well as destroy the mkey alias on the offload device
+ *                          (if needed).
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_destroy_exported_key_func_t)(
+        uct_ib_md_t *ib_md, uct_ib_mem_t *ib_memh);
+
+
 typedef struct uct_ib_md_ops {
-    uct_ib_md_open_func_t                open;
-    uct_ib_md_cleanup_func_t             cleanup;
-    uct_ib_md_reg_key_func_t             reg_key;
-    uct_ib_md_reg_indirect_key_func_t    reg_indirect_key;
-    uct_ib_md_dereg_key_func_t           dereg_key;
-    uct_ib_md_reg_atomic_key_func_t      reg_atomic_key;
-    uct_ib_md_dereg_atomic_key_func_t    dereg_atomic_key;
-    uct_ib_md_reg_multithreaded_func_t   reg_multithreaded;
-    uct_ib_md_dereg_multithreaded_func_t dereg_multithreaded;
-    uct_ib_md_mem_prefetch_func_t        mem_prefetch;
-    uct_ib_md_get_atomic_mr_id_func_t    get_atomic_mr_id;
-    uct_ib_md_reg_exported_key_func_t    reg_exported_key;
-    uct_ib_md_import_exported_key_func_t import_exported_key;
+    uct_ib_md_open_func_t                 open;
+    uct_ib_md_cleanup_func_t              cleanup;
+    uct_ib_md_reg_key_func_t              reg_key;
+    uct_ib_md_reg_indirect_key_func_t     reg_indirect_key;
+    uct_ib_md_dereg_key_func_t            dereg_key;
+    uct_ib_md_reg_atomic_key_func_t       reg_atomic_key;
+    uct_ib_md_dereg_atomic_key_func_t     dereg_atomic_key;
+    uct_ib_md_reg_multithreaded_func_t    reg_multithreaded;
+    uct_ib_md_dereg_multithreaded_func_t  dereg_multithreaded;
+    uct_ib_md_mem_prefetch_func_t         mem_prefetch;
+    uct_ib_md_get_atomic_mr_id_func_t     get_atomic_mr_id;
+    uct_ib_md_reg_exported_key_func_t     reg_exported_key;
+    uct_ib_md_import_exported_key_func_t  import_exported_key;
+    uct_ib_md_destroy_exported_key_func_t destroy_exported_key;
 } uct_ib_md_ops_t;
 
 
