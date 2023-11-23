@@ -1904,11 +1904,11 @@ err_out:
 }
 
 static ucs_status_t
-uct_ib_mlx5_devx_import_exported_key(uct_ib_md_t *ib_md, uint64_t flags,
+uct_ib_mlx5_devx_import_exported_key(uct_ib_md_t *ib_md,
                                      uint32_t target_gvmi_id,
-                                     uint32_t target_mkey_flags,
                                      uint32_t target_mkey,
                                      uint64_t target_address,
+                                     uint32_t target_mkey_flags,
                                      uct_ib_mem_t *ib_memh)
 {
     uct_ib_mlx5_md_t *md    = ucs_derived_of(ib_md, uct_ib_mlx5_md_t);
@@ -1948,7 +1948,8 @@ uct_ib_mlx5_devx_import_exported_key(uct_ib_md_t *ib_md, uint64_t flags,
     dv.pd.out = &dvpd;
     rc        = mlx5dv_init_obj(&dv, MLX5DV_OBJ_PD);
     if (rc) {
-        uct_md_log_mem_attach_error(flags, "mlx5dv_init_obj() failed: %m");
+        uct_md_log_mem_attach_error(UCS_LOG_LEVEL_ERROR,
+                                    "mlx5dv_init_obj() failed: %m");
         return UCS_ERR_IO_ERROR;
     }
 
@@ -1970,14 +1971,14 @@ uct_ib_mlx5_devx_import_exported_key(uct_ib_md_t *ib_md, uint64_t flags,
     memh->cross_mr = uct_ib_mlx5_devx_obj_create(md->super.dev.ibv_context, in,
                                                  sizeof(in), out, sizeof(out),
                                                  "MKEY_ALIAS",
-                                                 uct_md_attach_log_lvl(flags));
+                                                 UCS_LOG_LEVEL_ERROR);
     if (memh->cross_mr == NULL) {
         return UCS_ERR_IO_ERROR;
     }
 
     rc = UCT_IB_MLX5DV_GET(create_alias_obj_out, out, alias_ctx.status);
     if (rc) {
-        uct_md_log_mem_attach_error(flags,
+        uct_md_log_mem_attach_error(UCS_LOG_LEVEL_ERROR,
                                     "created MR alias object in bad state,"
                                     " syndrome 0x%x",
                                     UCT_IB_MLX5DV_GET(create_alias_obj_out,

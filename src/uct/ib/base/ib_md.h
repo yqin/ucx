@@ -391,9 +391,9 @@ typedef ucs_status_t (*uct_ib_md_reg_exported_key_func_t)(
  * @return UCS_OK on success or error code in case of failure.
  */
 typedef ucs_status_t (*uct_ib_md_import_exported_key_func_t)(
-        uct_ib_md_t *ib_md, uint64_t flags, uint32_t target_gvmi_id,
-        uint32_t target_mkey_flags, uint32_t target_mkey, 
-        uint64_t target_address, uct_ib_mem_t *ib_memh);
+        uct_ib_md_t *ib_md, uint32_t target_gvmi_id, uint32_t target_mkey, 
+        uint64_t target_address,
+        uint32_t target_mkey_flags, uct_ib_mem_t *ib_memh);
 
 
 /**
@@ -474,15 +474,9 @@ static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_lkey(uint64_t exported_mkey)
     return (uint32_t)exported_mkey;
 }
 
-
-static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_lkey_flags(uint64_t exported_mkey)
-{
-    return (uint32_t)((uint16_t)(exported_mkey >> 32));
-}
-
 static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_vhca_id(uint64_t exported_mkey)
 {
-    return (uint32_t)((uint16_t)(exported_mkey >> 48));
+    return exported_mkey >> 32;
 }
 
 
@@ -504,19 +498,12 @@ uct_ib_md_pack_rkey(uint32_t rkey, uint32_t atomic_rkey, void *rkey_buffer)
 
 
 static UCS_F_ALWAYS_INLINE void
-uct_ib_md_pack_exported_mkey(uint32_t lkey, uint32_t lkey_flags,
-                             uint32_t vhca_id, void *buffer)
+uct_ib_md_pack_exported_mkey(uint32_t lkey, uint32_t vhca_id, void *buffer)
 {
     uint64_t *mkey_p = (uint64_t*)buffer;
 
-    /* mkey buffer format:
-     *     vhca_id (16 bits) | lkey_flags (16 bits) | lkey (32 bits)
-     */
-    *mkey_p = (((uint64_t)vhca_id) << 48) |
-              (((uint64_t)lkey_flags) << 32) |
-              lkey;
-    ucs_trace("packed exported mkey: lkey 0x%x flags 0x%x vhca_id 0x%x",
-              lkey, lkey_flags, vhca_id);
+    *mkey_p = (((uint64_t)vhca_id) << 32) | lkey;
+    ucs_trace("packed exported mkey: lkey 0x%x vhca_id 0x%x", lkey, vhca_id);
 }
 
 

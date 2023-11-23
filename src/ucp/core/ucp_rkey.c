@@ -335,6 +335,12 @@ ucp_memh_exported_packed_size(ucp_context_h context, ucp_md_map_t md_map)
         /* TL mkey */
         size += md_attr->exported_mkey_packed_size;
 
+        /* base address associated with this mkey */
+        size += sizeof(uint64_t);
+
+        /* flags associated with this mkey */
+        size += sizeof(uint32_t);
+
         /* Size of component name */
         size += sizeof(uint8_t);
 
@@ -373,7 +379,7 @@ ucp_memh_exported_pack(const ucp_mem_h memh, void *buffer)
     ucp_md_index_t md_index;
     unsigned uct_memh_index;
     size_t tl_mkey_size, component_name_size, global_id_size;
-    void *tl_mkey_buf, *component_name_buf, *global_id_buf;
+    void *tl_mkey_buf, *tl_buf, *component_name_buf, *global_id_buf;
     size_t tl_mkey_data_size;
 
     ucs_log_indent(1);
@@ -404,7 +410,7 @@ ucp_memh_exported_pack(const ucp_mem_h memh, void *buffer)
     ucs_for_each_bit(md_index, context->export_md_map[memh->mem_type]) {
         md_attr = &tl_mds[md_index].attr;
 
-        /* Save pointer to the begging of the TL mkey data to fill later by the
+        /* Save pointer to the begining of the TL mkey data to fill later by the
          * resulted size of TL mkey data */
         md_data_p                         = p;
         *ucs_serialize_next(&p, uint16_t) = 0;
@@ -420,6 +426,27 @@ ucp_memh_exported_pack(const ucp_mem_h memh, void *buffer)
         status      = uct_md_mkey_pack_v2(tl_mds[md_index].md,
                                           uct_memhs[md_index], &params,
                                           tl_mkey_buf);
+        if (status != UCS_OK) {
+            result = status;
+            goto out;
+        }
+
+        /* uct_memhs[md_index] contains the properly registered memh for export
+         * so we pack base address and flags after tl_mkey_buf
+         */
+        /* TL mkey base address */
+        tl_buf = ucs_serialize_next_raw(&p, void, sizeof(uint64_t));
+        status = uct_md_mkey_pack_address(tl_mds[md_index].md,
+                                          uct_memhs[md_index], &params, tl_buf);
+        if (status != UCS_OK) {
+            result = status;
+            goto out;
+        }
+
+        /* TL mkey flags */
+        tl_buf = ucs_serialize_next_raw(&p, void, sizeof(uint32_t));
+        status = uct_md_mkey_pack_flags(tl_mds[md_index].md,
+                                        uct_memhs[md_index], &params, tl_buf);
         if (status != UCS_OK) {
             result = status;
             goto out;

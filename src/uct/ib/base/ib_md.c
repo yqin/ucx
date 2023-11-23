@@ -825,7 +825,7 @@ uct_ib_md_mem_attach(uct_md_h uct_md, const void *mkey_buffer,
                      uct_md_mem_attach_params_t *params, uct_mem_h *memh_p)
 {
     const uint64_t *mkey = (const uint64_t*)mkey_buffer;
-    uint64_t flags       = UCT_MD_MEM_ATTACH_FIELD_VALUE(params, flags,
+    uint32_t flags       = UCT_MD_MEM_ATTACH_FIELD_VALUE(params, flags,
                                                          FIELD_FLAGS, 0);
     uint64_t address     = UCT_MD_MEM_ATTACH_FIELD_VALUE(params, address,
                                                          FIELD_ADDRESS, 0);
@@ -834,14 +834,14 @@ uct_ib_md_mem_attach(uct_md_h uct_md, const void *mkey_buffer,
     ucs_status_t status;
 
     if (mkey == NULL) {
-        uct_md_log_mem_reg_error(flags,
+        uct_md_log_mem_reg_error(UCS_LOG_LEVEL_ERROR,
                                  "exported_mkey_buffer shouldn't be NULL");
         return UCS_ERR_INVALID_PARAM;
     }
 
     ib_memh = uct_ib_memh_alloc(md);
     if (ib_memh == NULL) {
-        uct_md_log_mem_attach_error(flags,
+        uct_md_log_mem_attach_error(UCS_LOG_LEVEL_ERROR,
                                     "md %p: failed to allocate memory handle",
                                     md);
         return UCS_ERR_NO_MEMORY;
@@ -849,9 +849,8 @@ uct_ib_md_mem_attach(uct_md_h uct_md, const void *mkey_buffer,
 
     uct_ib_mem_init(ib_memh, UCT_IB_MEM_FLAG_NO_RCACHE);
 
-    status = md->ops->import_exported_key(md, flags, uct_ib_md_vhca_id(*mkey),
-                                          uct_ib_md_lkey_flags(*mkey),
-                                          uct_ib_md_lkey(*mkey), address,
+    status = md->ops->import_exported_key(md, uct_ib_md_vhca_id(*mkey),
+                                          uct_ib_md_lkey(*mkey), address, flags,
                                           ib_memh);
     if (status != UCS_OK) {
         goto out_memh_free;
@@ -1031,10 +1030,9 @@ uct_ib_mkey_pack(uct_md_h uct_md, uct_mem_h uct_memh,
     }
 
     if (flags & UCT_MD_MKEY_PACK_FLAG_EXPORT) {
-        /* TODO: should we also pack mkey_flags separately like below? */
         ucs_print("packing exported mkey 0x%x flags 0x%x vhca_id %d", mkey,
                   mkey_flags, md->vhca_id);
-        uct_ib_md_pack_exported_mkey(mkey, mkey_flags, md->vhca_id, mkey_buffer);
+        uct_ib_md_pack_exported_mkey(mkey, md->vhca_id, mkey_buffer);
     } else {
         uct_ib_md_pack_rkey(mkey, atomic_rkey, mkey_buffer);
     }
