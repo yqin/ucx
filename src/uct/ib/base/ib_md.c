@@ -946,7 +946,7 @@ uct_ib_mkey_pack_address(uct_md_h uct_md, uct_mem_h uct_memh,
 
 static ucs_status_t
 uct_ib_mkey_pack_flags(uct_md_h uct_md, uct_mem_h uct_memh,
-                 const uct_md_mkey_pack_params_t *params, void *buffer)
+                       const uct_md_mkey_pack_params_t *params, void *buffer)
 {
     uct_ib_mem_t *memh = uct_memh;
     uint32_t *flags_p = (uint32_t *)buffer;

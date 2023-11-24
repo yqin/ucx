@@ -144,6 +144,8 @@ ucp_rkey_pack_common(ucp_context_h context, ucp_md_map_t md_map,
     void *tl_rkey_buf, *tl_buf;
     ssize_t result;
     uct_mem_h uct_memh;
+    uct_md_attr_v2_t *md_attr;
+    int is_ib_md;
 
     /* Check that md_map is valid */
     ucs_assert(ucs_test_all_flags(UCS_MASK(context->num_mds), md_map));
@@ -161,25 +163,31 @@ ucp_rkey_pack_common(ucp_context_h context, ucp_md_map_t md_map,
     uct_memh_index = 0;
     ucs_for_each_bit (md_index, md_map) {
         params.flags = context->tl_mds[md_index].pack_flags_mask & uct_flags;
+        md_attr = &context->tl_mds[md_index].attr;
+        is_ib_md = !strcmp(md_attr->component_name, "ib");
         uct_memh = memh[sparse_memh ? md_index : uct_memh_index];
 
-        /* TODO: pack address and flags only for an IB MD, otherwise pass */
+        /* pack address and flags only for an IB MD, otherwise pass */
         /* rkey base address */
         tl_buf = ucs_serialize_next_raw(&p, void, sizeof(uint64_t));
-        status = uct_md_mkey_pack_address(context->tl_mds[md_index].md,
-                                          uct_memh, &params, tl_buf);
-        if (status != UCS_OK) {
-            result = status;
-            goto out;
+        if (is_ib_md) {
+            status = uct_md_mkey_pack_address(context->tl_mds[md_index].md,
+                                              uct_memh, &params, tl_buf);
+            if (status != UCS_OK) {
+                result = status;
+                goto out;
+            }
         }
 
         /* rkey flags */
         tl_buf = ucs_serialize_next_raw(&p, void, sizeof(uint32_t));
-        status = uct_md_mkey_pack_flags(context->tl_mds[md_index].md, uct_memh,
-                                        &params, tl_buf);
-        if (status != UCS_OK) {
-            result = status;
-            goto out;
+        if (is_ib_md) {
+            status = uct_md_mkey_pack_flags(context->tl_mds[md_index].md, uct_memh,
+                                            &params, tl_buf);
+            if (status != UCS_OK) {
+                result = status;
+                goto out;
+            }
         }
 
         /* rkey size */
