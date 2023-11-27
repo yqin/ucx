@@ -497,6 +497,7 @@ ucp_rndv_progress_rma_zcopy_common(ucp_request_t *req, ucp_lane_index_t lane,
 
     ucs_assert_always(req->send.lane != UCP_NULL_LANE);
     ucs_assert_always(req->send.rndv.lanes_count > 0);
+    memset(iov, 0, max_iovcnt * sizeof(uct_iov_t));
 
     if (req->send.rndv.mdesc == NULL) {
         status = ucp_send_request_add_reg_lane(req, lane);

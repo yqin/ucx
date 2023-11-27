@@ -264,6 +264,23 @@ typedef struct uct_ib_mlx5_mem_lru_entry {
 
 KHASH_MAP_INIT_INT(rkeys, uct_ib_mlx5_mem_lru_entry_t*);
 
+
+/* Data structure to hold the UMR MR (on the host) item in the mkey pool */
+typedef struct {
+    ucs_list_link_t     super;
+    struct mlx5dv_mkey  *umr_mkey;
+} uct_ib_mlx5dv_indirect_mr_t;
+
+/* Data structure to hold the UMR mkey alias (on the DPU) item in the hash map */
+typedef struct {
+    struct mlx5dv_devx_obj  *cross_mr;
+    uint32_t                lkey;
+} uct_ib_mlx5dv_indirect_alias_t;
+
+/* Hash map of indirect mkey (from the host) to mkey alias (on the DPU) */
+/* Note the hash key here is: gvmi_id << 32 | mkey (both uint32_t) */
+KHASH_MAP_INIT_INT64(indirect_mkey_map, uct_ib_mlx5dv_indirect_alias_t);
+
 #endif
 
 
@@ -288,6 +305,18 @@ typedef struct uct_ib_mlx5_md {
     struct ibv_mr            *flush_mr;
     struct mlx5dv_devx_obj   *flush_dvmr;
     uint8_t                  mkey_tag;
+
+    /* special CQ and QP for indirect (UMR) mkeys */
+    struct ibv_cq            *umr_cq;       /* special CQ for UMR */
+    struct ibv_qp            *umr_qp;       /* special QP for UMR */
+    struct ibv_qp_ex         *umr_qpx;      /* QP_EX for UMR */
+    struct mlx5dv_qp_ex      *umr_dv_qpx;   /* MLX5DV_QP_EX for UMR */
+
+    /* Indirect (UMR) mkey pool (on the host) */
+    ucs_list_link_t             indirect_mkey_pool;
+
+    /* Hash map of indirect mkey (from the host) to mkey alias (on the DPU) */
+    khash_t(indirect_mkey_map)  *indirect_mkey_hash;
 #endif
     struct {
         size_t dc;

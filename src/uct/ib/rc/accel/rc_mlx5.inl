@@ -11,6 +11,8 @@
 #include <uct/ib/mlx5/ib_mlx5.inl>
 #include <uct/ib/mlx5/ib_mlx5_log.h>
 
+#include <ucp/core/ucp_rkey.h>
+
 #define UCT_RC_MLX5_EP_DECL(_tl_ep, _iface, _ep) \
     uct_rc_mlx5_ep_t *_ep = ucs_derived_of(_tl_ep, uct_rc_mlx5_ep_t); \
     uct_rc_mlx5_iface_common_t *_iface = ucs_derived_of(_tl_ep->iface, \
@@ -802,6 +804,9 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
     uct_rc_mlx5_hdr_t            *rch;
     unsigned                      wqe_size, inl_seg_size, ctrl_av_size;
     void                         *next_seg;
+    ucp_tl_rkey_t                *tl_rkey = iov->scratch;
+    uint64_t                     rkey_base;
+    uint32_t                     rkey_flags;
 
     if (!(fm_ce_se & MLX5_WQE_CTRL_CQ_UPDATE)) {
         fm_ce_se |= uct_rc_iface_tx_moderation(&iface->super, txqp, MLX5_WQE_CTRL_CQ_UPDATE);
@@ -859,6 +864,16 @@ void uct_rc_mlx5_txqp_dptr_post_iov(uct_rc_mlx5_iface_common_t *iface, int qp_ty
     case MLX5_OPCODE_RDMA_WRITE:
         /* Set RDMA segment */
         ucs_assert(uct_iov_total_length(iov, iovcnt) <= UCT_IB_MAX_MESSAGE_SIZE);
+
+        /* use 0-based address for xgvmi umr rkey */
+        if (ucs_unlikely(tl_rkey != NULL)) {
+            rkey_base  = tl_rkey->rkey.address;
+            rkey_flags = tl_rkey->rkey.flags;
+
+            if (rkey_flags & UCT_IB_MEM_FLAG_INDIRECT) {
+                remote_addr -= rkey_base;
+            }
+        }
 
         raddr            = next_seg;
         uct_ib_mlx5_ep_set_rdma_seg(raddr, remote_addr, rkey);
@@ -1695,7 +1710,7 @@ static ucs_status_t UCS_F_ALWAYS_INLINE uct_rc_mlx5_common_ep_short_dm(
         uint16_t dci_channel, uint64_t rdma_raddr, uct_rkey_t rdma_rkey,
         uct_rc_txqp_t *txqp, uct_ib_mlx5_txwq_t *txwq, size_t av_size)
 {
-    uct_iov_t iov;
+    uct_iov_t iov = {0};
 
     iov.buffer = (void*)payload;
     iov.count  = 1;

@@ -322,6 +322,7 @@ uct_ib_mlx5_ep_set_rdma_seg(struct mlx5_wqe_raddr_seg *raddr, uint64_t rdma_radd
     raddr->raddr = htobe64(rdma_raddr);
     raddr->rkey  = htonl(rdma_rkey);
 #endif
+    ucs_trace("rdma data seg addr 0x%lx rkey 0x%lx", rdma_raddr, rdma_rkey);
 }
 
 
@@ -471,6 +472,7 @@ uct_ib_mlx5_set_data_seg(struct mlx5_wqe_data_seg *dptr,
     dptr->byte_count = htonl(length);
     dptr->lkey       = htonl(lkey);
     dptr->addr       = htobe64((uintptr_t)address);
+    ucs_trace("data seg addr %p lkey 0x%x length %d", address, lkey, length);
 }
 
 
@@ -481,6 +483,9 @@ size_t uct_ib_mlx5_set_data_seg_iov(uct_ib_mlx5_txwq_t *txwq,
 {
     size_t wqe_size = 0;
     size_t iov_it;
+    uint32_t lkey_flags;
+    uint64_t lkey_base;
+    void *local_address;
 
     for (iov_it = 0; iov_it < iovcnt; ++iov_it) {
         if (!iov[iov_it].length) { /* Skip zero length WQE*/
@@ -488,9 +493,18 @@ size_t uct_ib_mlx5_set_data_seg_iov(uct_ib_mlx5_txwq_t *txwq,
         }
         ucs_assert(iov[iov_it].memh != UCT_MEM_HANDLE_NULL);
 
+        /* use 0-based address for xgvmi umr lkey */
+        lkey_flags = uct_ib_memh_get_flags(iov[iov_it].memh);
+        if (ucs_unlikely(lkey_flags & UCT_IB_MEM_FLAG_INDIRECT)) {
+            lkey_base = uct_ib_memh_get_address(iov[iov_it].memh);
+            local_address = (void*)((uint64_t)iov[iov_it].buffer - lkey_base);
+        } else {
+            local_address = iov[iov_it].buffer;
+        }
+
         /* place data into the buffer */
         dptr = uct_ib_mlx5_txwq_wrap_any(txwq, dptr);
-        uct_ib_mlx5_set_data_seg(dptr, iov[iov_it].buffer,
+        uct_ib_mlx5_set_data_seg(dptr, local_address,
                                  uct_iov_get_length(iov + iov_it),
                                  uct_ib_memh_get_lkey(iov[iov_it].memh));
         wqe_size += sizeof(*dptr);

@@ -150,6 +150,12 @@ typedef struct uct_iov {
     size_t    stride;   /**< Stride between beginnings of payload elements in
                              the buffer in bytes */
     unsigned  count;    /**< Number of payload elements in the buffer */
+    void     *scratch;  /**< A dummy pointer which could be used to pass in data
+                             for cases when iov is used, this data does not need
+                             to be associated with iov but just some auxiliary
+                             data, e.g., pass in xgvmi rkey reference for
+                             uct_ep_get_zcopy() when iov is used for local
+                             buffer */
 } uct_iov_t;
 
 

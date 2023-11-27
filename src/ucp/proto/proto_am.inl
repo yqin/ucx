@@ -49,11 +49,12 @@ static UCS_F_ALWAYS_INLINE void
 ucp_add_uct_iov_elem(uct_iov_t *iov, void *buffer, size_t length,
                      uct_mem_h memh, size_t *iov_cnt)
 {
-    iov[*iov_cnt].buffer = buffer;
-    iov[*iov_cnt].length = length;
-    iov[*iov_cnt].count  = 1;
-    iov[*iov_cnt].stride = 0;
-    iov[*iov_cnt].memh   = memh;
+    iov[*iov_cnt].buffer  = buffer;
+    iov[*iov_cnt].length  = length;
+    iov[*iov_cnt].count   = 1;
+    iov[*iov_cnt].stride  = 0;
+    iov[*iov_cnt].memh    = memh;
+    iov[*iov_cnt].scratch = NULL;
     ++(*iov_cnt);
 }
 

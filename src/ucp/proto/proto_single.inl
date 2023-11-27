@@ -101,6 +101,7 @@ ucp_proto_zcopy_single_progress(ucp_request_t *req, unsigned uct_mem_flags,
     uct_iov_t iov[2];
 
     ucs_assert(req->send.state.dt_iter.offset == 0);
+    memset(iov, 0, 2 * sizeof(uct_iov_t));
 
     if (!(req->flags & UCP_REQUEST_FLAG_PROTO_INITIALIZED)) {
         md_map = (spriv->reg_md == UCP_NULL_RESOURCE) ? 0 : UCS_BIT(spriv->reg_md);

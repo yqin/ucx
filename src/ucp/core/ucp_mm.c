@@ -1361,6 +1361,8 @@ static void
 ucp_memh_import_parse_tl_mkey_data(ucp_context_h context, 
                                    const void **start_p,
                                    const void **tl_mkey_buf_p,
+                                   uint64_t *tl_mkey_address,
+                                   uint32_t *tl_mkey_flags,
                                    ucp_md_map_t *md_map_p)
 {
     const void *p = *start_p;
@@ -1383,6 +1385,12 @@ ucp_memh_import_parse_tl_mkey_data(ucp_context_h context,
 
     /* TL mkey */
     tl_mkey_buf = ucs_serialize_next_raw(&p, void, tl_mkey_size);
+
+    /* TL mkey base address */
+    *tl_mkey_address = *ucs_serialize_next(&p, uint64_t);
+
+    /* TL mkey flags */
+    *tl_mkey_flags = *ucs_serialize_next(&p, uint32_t);
 
     /* Size of component name */
     component_name_size = *ucp_memh_serialize_next(&p, uint8_t, end, 0u);
@@ -1412,6 +1420,8 @@ ucp_memh_import_parse_tl_mkey_data(ucp_context_h context,
 
 typedef struct {
     ucp_md_index_t md_index;
+    uint64_t       tl_mkey_address;
+    uint32_t       tl_mkey_flags;
     const void     *tl_mkey_buf;
 } ucp_memh_import_attach_params_t;
 
@@ -1423,6 +1433,8 @@ ucp_memh_import_attach(ucp_context_h context, ucp_mem_h memh,
     ucp_md_index_t md_index = UCP_NULL_RESOURCE;
     unsigned attach_params_iter;
     const void *tl_mkey_buf;
+    uint64_t tl_mkey_address;
+    uint32_t tl_mkey_flags;
     uct_md_mem_attach_params_t attach_params;
     uct_md_attr_v2_t *md_attr;
     ucs_status_t status;
@@ -1430,13 +1442,17 @@ ucp_memh_import_attach(ucp_context_h context, ucp_mem_h memh,
 
     for (attach_params_iter = 0; attach_params_iter < attach_params_num;
          ++attach_params_iter) {
-        md_index    = attach_params_array[attach_params_iter].md_index;
-        tl_mkey_buf = attach_params_array[attach_params_iter].tl_mkey_buf;
-        md_attr     = &context->tl_mds[md_index].attr;
+        md_index        = attach_params_array[attach_params_iter].md_index;
+        tl_mkey_address = attach_params_array[attach_params_iter].tl_mkey_address;
+        tl_mkey_flags   = attach_params_array[attach_params_iter].tl_mkey_flags;
+        tl_mkey_buf     = attach_params_array[attach_params_iter].tl_mkey_buf;
+        md_attr         = &context->tl_mds[md_index].attr;
         ucs_assert_always(md_attr->flags & UCT_MD_FLAG_EXPORTED_MKEY);
 
-        attach_params.field_mask = UCT_MD_MEM_ATTACH_FIELD_FLAGS;
-        attach_params.flags      = UCT_MD_MEM_ATTACH_FLAG_HIDE_ERRORS;
+        attach_params.field_mask = UCT_MD_MEM_ATTACH_FIELD_FLAGS |
+                                   UCT_MD_MEM_ATTACH_FIELD_ADDRESS;
+        attach_params.flags      = tl_mkey_flags;
+        attach_params.address    = tl_mkey_address;
 
         status = uct_md_mem_attach(context->tl_mds[md_index].md, tl_mkey_buf,
                                    &attach_params, &uct_memh);
@@ -1566,6 +1582,8 @@ ucp_memh_import(ucp_context_h context, const void *export_mkey_buffer,
     uint64_t UCS_V_UNUSED mem_info_parsed_size;
     uint64_t remote_uuid;
     const void *tl_mkey_buf;
+    uint64_t tl_mkey_address;
+    uint32_t tl_mkey_flags;
     ucs_rcache_region_t *rregion;
     khiter_t iter;
     void *address;
@@ -1612,6 +1630,7 @@ ucp_memh_import(ucp_context_h context, const void *export_mkey_buffer,
 
     ucs_for_each_bit(remote_md_index, remote_md_map) {
         ucp_memh_import_parse_tl_mkey_data(context, &p, &tl_mkey_buf,
+                                           &tl_mkey_address, &tl_mkey_flags,
                                            &local_md_map);
 
         if (local_md_map == 0) {
@@ -1619,8 +1638,10 @@ ucp_memh_import(ucp_context_h context, const void *export_mkey_buffer,
         }
 
         ucs_for_each_bit(md_index, local_md_map) {
-            attach_params_array[attach_params_num].md_index    = md_index;
-            attach_params_array[attach_params_num].tl_mkey_buf = tl_mkey_buf;
+            attach_params_array[attach_params_num].md_index        = md_index;
+            attach_params_array[attach_params_num].tl_mkey_address = tl_mkey_address;
+            attach_params_array[attach_params_num].tl_mkey_flags   = tl_mkey_flags;
+            attach_params_array[attach_params_num].tl_mkey_buf     = tl_mkey_buf;
             ++attach_params_num;
         }
     }

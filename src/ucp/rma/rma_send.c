@@ -371,7 +371,7 @@ ucs_status_ptr_t ucp_get_nbx(ucp_ep_h ep, void *buffer, size_t count,
     UCP_RMA_CHECK_PTR(worker->context, buffer, count);
     UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(worker);
 
-    ucs_trace_req("get_nbx buffer %p count %zu remote_addr %"PRIx64" rkey %p from %s cb %p",
+    ucs_trace_req("get_nbx buffer %p count %zu remote_addr 0x%"PRIx64" rkey %p from %s cb %p",
                    buffer, count, remote_addr, rkey, ucp_ep_peer_name(ep),
                    (param->op_attr_mask & UCP_OP_ATTR_FIELD_CALLBACK) ?
                    param->cb.send : NULL);

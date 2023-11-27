@@ -348,7 +348,7 @@ static UCS_F_ALWAYS_INLINE ucs_status_t ucp_proto_rndv_put_zcopy_send_func(
 {
     const ucp_proto_rndv_put_priv_t *rpriv = req->send.proto_config->priv;
     size_t max_payload;
-    uct_iov_t iov;
+    uct_iov_t iov = {0};
 
     max_payload = ucp_proto_rndv_bulk_max_payload_align(req, &rpriv->bulk,
                                                         lpriv, lane_shift);
@@ -439,7 +439,7 @@ static UCS_F_ALWAYS_INLINE ucs_status_t ucp_proto_rndv_put_mtype_send_func(
         ucp_datatype_iter_t *next_iter, ucp_lane_index_t *lane_shift)
 {
     const ucp_proto_rndv_put_priv_t *rpriv = req->send.proto_config->priv;
-    uct_iov_t iov;
+    uct_iov_t iov = {0};
 
     ucp_proto_rndv_mtype_next_iov(req, &rpriv->bulk, lpriv, next_iter, &iov);
     return ucp_proto_rndv_put_common_send(req, lpriv, &iov,

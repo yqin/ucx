@@ -59,8 +59,12 @@ enum {
     UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4), /**< The memory region will issue
                                                         PCIe writes with relaxed order
                                                         attribute */
-    UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(5)  /**< Memory handle wasn't stored
+    UCT_IB_MEM_FLAG_NO_RCACHE        = UCS_BIT(5), /**< Memory handle wasn't stored
                                                         in RCACHE */
+    UCT_IB_MEM_FLAG_INDIRECT         = UCS_BIT(6), /**< Indirect/UMR mkey (0-based) */
+    UCT_IB_MEM_FLAG_XGVMI            = UCS_BIT(7), /**< Memory handle contains
+                                                        xgvmi mkey */
+    UCT_IB_MEM_FLAG_XGVMI_ALIAS      = UCS_BIT(8)  /**< Alias of the xgvmi mkey */
 };
 
 enum {
@@ -78,7 +82,7 @@ typedef struct uct_ib_md_ext_config {
     int                      prefer_nearest_device; /**< Give priority for near
                                                          device */
     int                      enable_indirect_atomic; /** Enable indirect atomic */
-
+    int                      max_inline_klm_list; /* Maximal length of inline KLM list */
     struct {
         ucs_numa_policy_t    numa_policy;  /**< NUMA policy flags for ODP */
         int                  prefetch;     /**< Auto-prefetch non-blocking memory
@@ -99,6 +103,7 @@ typedef struct uct_ib_md_ext_config {
 
 
 typedef struct uct_ib_mem {
+    uint64_t                address;
     uint32_t                lkey;
     uint32_t                exported_lkey;
     uint32_t                rkey;
@@ -374,34 +379,54 @@ typedef ucs_status_t (*uct_ib_md_reg_exported_key_func_t)(
 /**
  * Memory domain method to register crossing mkey for memory area.
  *
- * @param [in]  ib_md          Memory domain.
- * @param [in]  flags          UCT memory attach flags.
- * @param [in]  target_gvmi_id Target GVMI ID.
- * @param [in]  target_mkey    Target mkey this mkey refers to.
- * @param [out] ib_memh        Memory region handle.
- *                             Method should initialize lkey and rkey.
+ * @param [in]  ib_md               Memory domain.
+ * @param [in]  flags               UCT memory attach flags.
+ * @param [in]  target_gvmi_id      Target GVMI ID.
+ * @param [in]  target_mkey_flags   Target mkey's flags.
+ * @param [in]  target_mkey         Target mkey this mkey refers to.
+ * @param [in]  target_address      Target address.
+ * @param [out] ib_memh             Memory region handle.
+ *                                  Method should initialize lkey and rkey.
  *
  * @return UCS_OK on success or error code in case of failure.
  */
 typedef ucs_status_t (*uct_ib_md_import_exported_key_func_t)(
-        uct_ib_md_t *ib_md, uint64_t flags, uint32_t target_gvmi_id,
-        uint32_t target_mkey, uct_ib_mem_t *ib_memh);
+        uct_ib_md_t *ib_md, uint32_t target_gvmi_id, uint32_t target_mkey, 
+        uint64_t target_address,
+        uint32_t target_mkey_flags, uct_ib_mem_t *ib_memh);
+
+
+/**
+ * Memory domain method to destroy crossed or crossing mkey for memory area.
+ *
+ * @param [in]  ib_md       Memory domain.
+ * @param [in]  ib_memh     Memory region handle.
+ *                          Method should destroy the exported mkey and put it
+ *                          back to the mkey pool (if needed) on the host, as
+ *                          well as destroy the mkey alias on the offload device
+ *                          (if needed).
+ *
+ * @return UCS_OK on success or error code in case of failure.
+ */
+typedef ucs_status_t (*uct_ib_md_destroy_exported_key_func_t)(
+        uct_ib_md_t *ib_md, uct_ib_mem_t *ib_memh);
 
 
 typedef struct uct_ib_md_ops {
-    uct_ib_md_open_func_t                open;
-    uct_ib_md_cleanup_func_t             cleanup;
-    uct_ib_md_reg_key_func_t             reg_key;
-    uct_ib_md_reg_indirect_key_func_t    reg_indirect_key;
-    uct_ib_md_dereg_key_func_t           dereg_key;
-    uct_ib_md_reg_atomic_key_func_t      reg_atomic_key;
-    uct_ib_md_dereg_atomic_key_func_t    dereg_atomic_key;
-    uct_ib_md_reg_multithreaded_func_t   reg_multithreaded;
-    uct_ib_md_dereg_multithreaded_func_t dereg_multithreaded;
-    uct_ib_md_mem_prefetch_func_t        mem_prefetch;
-    uct_ib_md_get_atomic_mr_id_func_t    get_atomic_mr_id;
-    uct_ib_md_reg_exported_key_func_t    reg_exported_key;
-    uct_ib_md_import_exported_key_func_t import_exported_key;
+    uct_ib_md_open_func_t                 open;
+    uct_ib_md_cleanup_func_t              cleanup;
+    uct_ib_md_reg_key_func_t              reg_key;
+    uct_ib_md_reg_indirect_key_func_t     reg_indirect_key;
+    uct_ib_md_dereg_key_func_t            dereg_key;
+    uct_ib_md_reg_atomic_key_func_t       reg_atomic_key;
+    uct_ib_md_dereg_atomic_key_func_t     dereg_atomic_key;
+    uct_ib_md_reg_multithreaded_func_t    reg_multithreaded;
+    uct_ib_md_dereg_multithreaded_func_t  dereg_multithreaded;
+    uct_ib_md_mem_prefetch_func_t         mem_prefetch;
+    uct_ib_md_get_atomic_mr_id_func_t     get_atomic_mr_id;
+    uct_ib_md_reg_exported_key_func_t     reg_exported_key;
+    uct_ib_md_import_exported_key_func_t  import_exported_key;
+    uct_ib_md_destroy_exported_key_func_t destroy_exported_key;
 } uct_ib_md_ops_t;
 
 
@@ -448,7 +473,6 @@ static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_lkey(uint64_t exported_mkey)
 {
     return (uint32_t)exported_mkey;
 }
-
 
 static UCS_F_ALWAYS_INLINE uint32_t uct_ib_md_vhca_id(uint64_t exported_mkey)
 {
@@ -528,6 +552,18 @@ static UCS_F_ALWAYS_INLINE uint32_t uct_ib_memh_get_lkey(uct_mem_h memh)
 {
     ucs_assert(memh != UCT_MEM_HANDLE_NULL);
     return ((uct_ib_mem_t*)memh)->lkey;
+}
+
+static UCS_F_ALWAYS_INLINE uint64_t uct_ib_memh_get_address(uct_mem_h memh)
+{
+    ucs_assert(memh != UCT_MEM_HANDLE_NULL);
+    return ((uct_ib_mem_t*)memh)->address;
+}
+
+static UCS_F_ALWAYS_INLINE uint32_t uct_ib_memh_get_flags(uct_mem_h memh)
+{
+    ucs_assert(memh != UCT_MEM_HANDLE_NULL);
+    return ((uct_ib_mem_t*)memh)->flags;
 }
 
 

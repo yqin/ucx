@@ -347,6 +347,34 @@ uct_md_mkey_pack_params_check(uct_md_h md, uct_mem_h memh, void *mkey_buffer)
     }
 }
 
+ucs_status_t
+uct_md_mkey_pack_address(uct_md_h md, uct_mem_h memh,
+                         const uct_md_mkey_pack_params_t *params, void *buffer)
+{
+    ucs_status_t status;
+
+    status = uct_md_mkey_pack_params_check(md, memh, buffer);
+    if (status != UCS_OK) {
+        return status;
+    }
+
+    return md->ops->mkey_pack_address(md, memh, params, buffer);
+}
+
+ucs_status_t
+uct_md_mkey_pack_flags(uct_md_h md, uct_mem_h memh,
+                       const uct_md_mkey_pack_params_t *params, void *buffer)
+{
+    ucs_status_t status;
+
+    status = uct_md_mkey_pack_params_check(md, memh, buffer);
+    if (status != UCS_OK) {
+        return status;
+    }
+
+    return md->ops->mkey_pack_flags(md, memh, params, buffer);
+}
+
 ucs_status_t uct_md_mkey_pack_v2(uct_md_h md, uct_mem_h memh,
                                  const uct_md_mkey_pack_params_t *params,
                                  void *mkey_buffer)
