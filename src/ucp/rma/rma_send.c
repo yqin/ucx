@@ -153,6 +153,12 @@ ucp_rma_request_init(ucp_request_t *req, ucp_ep_h ep, const void *buffer,
         return UCS_OK;
     }
 
+    /* populate xgvmi flags from param to req */
+    if (param->flags & UCP_REQUEST_FLAG_SEND_XGVMI)
+        req->flags |= UCP_REQUEST_FLAG_SEND_XGVMI;
+    if (param->flags & UCP_REQUEST_FLAG_RECV_XGVMI)
+        req->flags |= UCP_REQUEST_FLAG_RECV_XGVMI;
+
     status = ucp_send_request_set_user_memh(req,
                                             ucp_ep_config(ep)->key.rma_md_map,
                                             param);

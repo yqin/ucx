@@ -108,6 +108,7 @@ static ucs_status_t ucp_rma_basic_progress_get(uct_pending_req_t *self)
            the case when xgvmi umr mkey is used, we put the reference on iov to
            pass into uct
          */
+        iov.flags   = req->flags;
         iov.scratch = rkey->tl_rkey;
 
         status = UCS_PROFILE_CALL(uct_ep_get_zcopy,

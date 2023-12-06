@@ -5,6 +5,7 @@
  */
 
 #include "ib_mlx5.h"
+#include <ucp/core/ucp_request.h>
 
 typedef struct uct_ib_mlx5_wqe_ctrl_seg {
     __be32      opmod_idx_opcode;
@@ -479,7 +480,8 @@ uct_ib_mlx5_set_data_seg(struct mlx5_wqe_data_seg *dptr,
 static UCS_F_ALWAYS_INLINE
 size_t uct_ib_mlx5_set_data_seg_iov(uct_ib_mlx5_txwq_t *txwq,
                                     struct mlx5_wqe_data_seg *dptr,
-                                    const uct_iov_t *iov, size_t iovcnt)
+                                    const uct_iov_t *iov, size_t iovcnt,
+                                    unsigned opcode_flags)
 {
     size_t wqe_size = 0;
     size_t iov_it;
@@ -495,7 +497,11 @@ size_t uct_ib_mlx5_set_data_seg_iov(uct_ib_mlx5_txwq_t *txwq,
 
         /* use 0-based address for xgvmi umr lkey */
         lkey_flags = uct_ib_memh_get_flags(iov[iov_it].memh);
-        if (ucs_unlikely(lkey_flags & UCT_IB_MEM_FLAG_INDIRECT)) {
+        if (ucs_unlikely((lkey_flags & UCT_IB_MEM_FLAG_INDIRECT) &&
+                         (((opcode_flags == MLX5_OPCODE_RDMA_READ) &&
+                           (iov->flags & UCP_REQUEST_FLAG_RECV_XGVMI)) ||
+                          ((opcode_flags == MLX5_OPCODE_RDMA_WRITE) &&
+                           (iov->flags & UCP_REQUEST_FLAG_SEND_XGVMI))))) {
             lkey_base = uct_ib_memh_get_address(iov[iov_it].memh);
             local_address = (void*)((uint64_t)iov[iov_it].buffer - lkey_base);
         } else {
