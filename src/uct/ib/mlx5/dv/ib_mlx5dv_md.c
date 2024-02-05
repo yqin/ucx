@@ -1426,67 +1426,69 @@ static void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
     int rc;
     uct_ib_mlx5dv_indirect_mr_t *item, *tmp;
 
-    if (kh_size(md->indirect_mkey_hash) != 0) {
-        ucs_info("%s: UMR mkey hash has %d elements",
-                 uct_ib_device_name(&md->super.dev),
-                 kh_size(md->indirect_mkey_hash));
-    }
+    if (md->flags & UCT_IB_MLX5_MD_FLAG_INDIRECT_XGVMI) {
+        if (kh_size(md->indirect_mkey_hash) != 0) {
+            ucs_info("%s: UMR mkey hash has %d elements",
+                     uct_ib_device_name(&md->super.dev),
+                     kh_size(md->indirect_mkey_hash));
+        }
 
-    /* destroy indirect_mkey_hash */
-    kh_foreach_value(md->indirect_mkey_hash, mkey_alias, {
-        /* deregister each alias (value) */
-        ucs_print("%s: deregistered UMR mkey alias %p lkey 0x%x",
-                  uct_ib_device_name(&md->super.dev), mkey_alias.cross_mr,
-                  mkey_alias.lkey);
-        rc = mlx5dv_devx_obj_destroy(mkey_alias.cross_mr);
-        if (rc != 0) {
-            ucs_error("%s: failed to deregister UMR mkey alias %p lkey 0x%x: %m",
+        /* destroy indirect_mkey_hash */
+        kh_foreach_value(md->indirect_mkey_hash, mkey_alias, {
+            /* deregister each alias (value) */
+            ucs_print("%s: deregistered UMR mkey alias %p lkey 0x%x",
                       uct_ib_device_name(&md->super.dev), mkey_alias.cross_mr,
                       mkey_alias.lkey);
+            rc = mlx5dv_devx_obj_destroy(mkey_alias.cross_mr);
+            if (rc != 0) {
+                ucs_error("%s: failed to deregister UMR mkey alias %p lkey 0x%x: %m",
+                          uct_ib_device_name(&md->super.dev), mkey_alias.cross_mr,
+                          mkey_alias.lkey);
+            }
+        })
+        kh_destroy(indirect_mkey_map, md->indirect_mkey_hash);
+        ucs_print("%s: destroyed indirect_mkey_hash",
+                  uct_ib_device_name(&md->super.dev));
+
+        if (!ucs_list_is_empty(&md->indirect_mkey_pool)) {
+            ucs_info("%s: UMR mkey pool has %lu elements",
+                     uct_ib_device_name(&md->super.dev),
+                     ucs_list_length(&md->indirect_mkey_pool));
         }
-    })
-    kh_destroy(indirect_mkey_map, md->indirect_mkey_hash);
-    ucs_print("%s: destroyed indirect_mkey_hash",
-              uct_ib_device_name(&md->super.dev));
 
-    if (!ucs_list_is_empty(&md->indirect_mkey_pool)) {
-        ucs_info("%s: UMR mkey pool has %lu elements",
-                 uct_ib_device_name(&md->super.dev),
-                 ucs_list_length(&md->indirect_mkey_pool));
-    }
-
-    /* destroy indirect_mkey_pool */
-    ucs_list_for_each_safe(item, tmp, &md->indirect_mkey_pool, super) {
-        /* deregister each indirect mkey */
-        ucs_print("%s: deregistered UMR mkey %p lkey 0x%x",
-                  uct_ib_device_name(&md->super.dev), item->umr_mkey,
-                  item->umr_mkey->lkey);
-        rc = mlx5dv_destroy_mkey(item->umr_mkey);
-        if (rc != 0) {
-            ucs_error("%s: failed to destroy UMR mkey %p lkey 0x%x: %m",
+        /* destroy indirect_mkey_pool */
+        ucs_list_for_each_safe(item, tmp, &md->indirect_mkey_pool, super) {
+            /* deregister each indirect mkey */
+            ucs_print("%s: deregistered UMR mkey %p lkey 0x%x",
                       uct_ib_device_name(&md->super.dev), item->umr_mkey,
                       item->umr_mkey->lkey);
+            rc = mlx5dv_destroy_mkey(item->umr_mkey);
+            if (rc != 0) {
+                ucs_error("%s: failed to destroy UMR mkey %p lkey 0x%x: %m",
+                          uct_ib_device_name(&md->super.dev), item->umr_mkey,
+                          item->umr_mkey->lkey);
+            }
+            ucs_list_del(&item->super);
+            free(item);
+            ucs_print("%s: deleted UMR mr from pool (%ld)",
+                      uct_ib_device_name(&md->super.dev),
+                      ucs_list_length(&md->indirect_mkey_pool));
         }
-        ucs_list_del(&item->super);
-        free(item);
-        ucs_print("%s: deleted UMR mr from pool (%ld)",
-                  uct_ib_device_name(&md->super.dev),
-                  ucs_list_length(&md->indirect_mkey_pool));
-    }
-    ucs_print("%s: destroyed indirect_mkey_pool",
-              uct_ib_device_name(&md->super.dev));
-
-    /* destroy umr_qp and cq */
-    rc = ibv_destroy_qp(md->umr_qp);
-    if (rc != 0) {
-        ucs_error("%s: failed to destroy UMR QP: %m",
+        ucs_print("%s: destroyed indirect_mkey_pool",
                   uct_ib_device_name(&md->super.dev));
-    }
 
-    rc = ibv_destroy_cq(md->umr_cq);
-    if (rc != 0) {
-        ucs_error("%s: failed to destroy UMR CQ: %m",
-                  uct_ib_device_name(&md->super.dev));
+        /* destroy umr_qp and cq */
+        rc = ibv_destroy_qp(md->umr_qp);
+        if (rc != 0) {
+            ucs_error("%s: failed to destroy UMR QP: %m",
+                      uct_ib_device_name(&md->super.dev));
+        }
+
+        rc = ibv_destroy_cq(md->umr_cq);
+        if (rc != 0) {
+            ucs_error("%s: failed to destroy UMR CQ: %m",
+                      uct_ib_device_name(&md->super.dev));
+        }
     }
 
     uct_ib_mlx5_devx_mr_lru_cleanup(md);
