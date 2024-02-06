@@ -1286,6 +1286,11 @@ ucs_status_t uct_ib_iface_query(uct_ib_iface_t *iface, size_t xport_hdr_len,
         signal_rate                  = 25.78125e9 * 2;
         encoding                     = 64.0/66.0;
         break;
+    case 128: /* NDR */
+        iface_attr->latency.overhead = 600e-9;
+        signal_rate                  = 100e9;
+        encoding                     = 64.0/66.0;
+        break;
     default:
         ucs_error("Invalid active_speed on %s:%d: %d",
                   UCT_IB_IFACE_ARG(iface), active_speed);
