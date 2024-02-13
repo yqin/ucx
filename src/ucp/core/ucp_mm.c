@@ -676,12 +676,13 @@ ucp_memh_init_uct_reg(ucp_context_h context, ucp_mem_h memh, unsigned uct_flags)
         memh->parent = memh;
     } else {
         status = ucp_memh_get(context, address, length, mem_type, cache_md_map,
-                              uct_flags, &memh->parent);
+                              uct_flags, memh->flags, &memh->parent);
         if (status != UCS_OK) {
             goto err;
         }
 
         ucp_memh_init_from_parent(memh, cache_md_map);
+        memh->reg_id = memh->parent->reg_id;
 
         status = ucp_memh_register(context, memh, reg_md_map, uct_flags);
         if (status != UCS_OK) {

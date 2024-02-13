@@ -15,7 +15,7 @@
 #include <ucs/stats/stats.h>
 
 #define UCT_IB_MD_MAX_MR_SIZE        0x80000000UL
-#define UCT_IB_MD_PACKED_RKEY_SIZE   sizeof(uint64_t)
+#define UCT_IB_MD_PACKED_MKEY_SIZE   sizeof(uint64_t)
 #define UCT_IB_MD_INVALID_FLUSH_RKEY 0xff
 
 #define UCT_IB_MD_DEFAULT_GID_INDEX 0   /**< The gid index used by default for an IB/RoCE port */
